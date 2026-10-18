@@ -290,6 +290,16 @@ subtest 'primes_up_to' => sub {
     is_deeply [ grep { $is_prime->[$_] } 0 .. 30 ], [ 2, 3, 5, 7, 11, 13, 17, 19, 23, 29 ];
 };
 
+subtest 'binomial_is_odd' => sub {
+    # Build Pascal's triangle the slow way and compare.
+    my @row = (1);
+    for my $n (0 .. 40) {
+        my @wrong = grep { binomial_is_odd($n, $_) xor $row[$_] % 2 } 0 .. $n;
+        is_deeply \@wrong, [], "row $n";
+        @row = (1, (map { ($row[ $_ - 1 ] + $row[$_]) % 1024 } 1 .. $n), 1);
+    }
+};
+
 subtest 'gradient_palette' => sub {
     my @palette = gradient_palette([ [ 0, 255, 0, 0 ], [ 1, 0, 0, 255 ] ]);
     is $palette[0],  52, 'starts at the color the gradient starts on';
@@ -342,7 +352,7 @@ subtest 'cmd_math with no piece lists the pieces' => sub {
     my $server = FakeServer->new;
     my $item   = FakeItem->new;
     cmd_math('', $server, $item);
-    is_deeply $item->{printed}, [ [ 'math: pieces: julia lorenz mandelbrot newton seahorse ulam zeta', 'CLIENTCRAP' ] ];
+    is_deeply $item->{printed}, [ [ 'math: pieces: julia lorenz mandelbrot newton pascal seahorse ulam zeta', 'CLIENTCRAP' ] ];
     is_deeply $server->{sent}, [], 'nothing was sent';
 };
 
@@ -371,6 +381,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'lorenz      the Lorenz attractor, the butterfly of chaos',
             'mandelbrot  the whole Mandelbrot set, glowing toward its edge',
             'newton      Newton\'s method on z^3 - 1, three basins with a fractal border',
+            'pascal      Pascal\'s triangle mod 2, which turns out to be Sierpinski\'s',
             'seahorse    a seahorse tail in Seahorse Valley, 600 times closer',
             'ulam        the Ulam spiral, where the primes line up on diagonals',
             'zeta        the path of zeta(1/2 + it) through its first three zeros',
@@ -456,7 +467,7 @@ subtest 'things that change while a piece is drawing' => sub {
 subtest 'cmd_math refuses bad input' => sub {
     my $item = FakeItem->new;
     cmd_math('nope', FakeServer->new, $item);
-    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: julia lorenz mandelbrot newton seahorse ulam zeta', 'CLIENTERROR' ] ],
+    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: julia lorenz mandelbrot newton pascal seahorse ulam zeta', 'CLIENTERROR' ] ],
         'unknown piece';
 
     @printed = ();

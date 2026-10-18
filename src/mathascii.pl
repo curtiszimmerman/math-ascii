@@ -504,6 +504,41 @@ sub ulam_canvas {
     return pixels_to_canvas(\@pixels);
 }
 
+# Whether the binomial coefficient C(n, k) is odd. By Lucas's theorem it is
+# exactly when every bit set in k is also set in n.
+sub binomial_is_odd {
+    my ($n, $k) = @_;
+    return ($n & $k) == $k;
+}
+
+# Pascal's triangle with the odd entries lit and the even ones faint, which
+# draws the Sierpinski triangle: holes inside holes, all the way down. Each
+# entry is two pixels wide so it comes out square, and each row is shifted
+# half an entry from the last so the triangle stays centered.
+my @PASCAL_HUES = (
+    [ 0,   120, 255, 255 ],
+    [ 0.4, 60,  120, 255 ],
+    [ 0.7, 160, 60,  255 ],
+    [ 1,   255, 60,  180 ],
+);
+
+sub pascal_canvas {
+    my ($pixel_cols, $rows) = (140, 48);
+    my @palette = gradient_palette(\@PASCAL_HUES);
+    my @pixels  = map { [ ($BLACK) x $pixel_cols ] } 1 .. $rows;
+    for my $n (0 .. $rows - 1) {
+        my $odd_color = nearest_color_in(\@palette, gradient_rgb(\@PASCAL_HUES, $n / ($rows - 1)));
+        for my $k (0 .. $n) {
+            my $col = $pixel_cols / 2 - 1 - $n + 2 * $k;
+            @{ $pixels[$n] }[ $col, $col + 1 ] = (binomial_is_odd($n, $k) ? $odd_color : 90) x 2;
+        }
+    }
+    my $canvas = pixels_to_canvas(\@pixels);
+    put_text($canvas, 0, 1, 'C(n, k) mod 2', 97);
+    put_text($canvas, 1, 1, 'odd entries lit', 94);
+    return $canvas;
+}
+
 # The Lorenz system, dx/dt = 10(y - x), dy/dt = x(28 - z) - y,
 # dz/dt = xy - 8z/3: a simplified model of convection that never settles and
 # never repeats, looping around two wings in an order nobody can predict.
@@ -763,6 +798,7 @@ our %PIECES = (
     lorenz     => { draw => \&lorenz_canvas,     about => 'the Lorenz attractor, the butterfly of chaos' },
     newton     => { draw => \&newton_canvas,     about => 'Newton\'s method on z^3 - 1, three basins with a fractal border' },
     ulam       => { draw => \&ulam_canvas,       about => 'the Ulam spiral, where the primes line up on diagonals' },
+    pascal     => { draw => \&pascal_canvas,     about => 'Pascal\'s triangle mod 2, which turns out to be Sierpinski\'s' },
 );
 
 sub piece_list { return join ' ', sort keys %PIECES }
