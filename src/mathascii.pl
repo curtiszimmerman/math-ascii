@@ -371,25 +371,21 @@ sub zeta_canvas {
     return [ @$title, @{ pixels_to_canvas(zeta_pixels()) }, @$footer ];
 }
 
-# Follows z -> z^2 + c from z = 0. If z runs away within $max_steps, returns
-# how long it took; otherwise returns nothing. The step count is smoothed (the
-# standard n + 1 - log2(log|z|) trick with a big escape radius) so colors blend
-# instead of falling into bands.
-sub mandelbrot_escape {
-    my ($cx, $cy, $max_steps) = @_;
+# Follows z -> z^2 + c from the starting z given. If z runs away within
+# $max_steps, returns how long it took; otherwise returns nothing. The step
+# count is smoothed (the standard n + 1 - log2(log|z|) trick with a big escape
+# radius) so colors blend instead of falling into bands.
+#
+# The Mandelbrot set starts every c from z = 0; a Julia set fixes c and starts
+# from each point.
+sub escape_time {
+    my ($x, $y, $cx, $cy, $max_steps) = @_;
 
-    # Points in the main cardioid and the big bulb to its left never escape,
-    # and they're the slowest to check by iterating, so catch them up front.
-    my $q = ($cx - 0.25)**2 + $cy**2;
-    return if $q * ($q + $cx - 0.25) <= $cy**2 / 4;
-    return if ($cx + 1)**2 + $cy**2 <= 1 / 16;
-
-    # Other bounded points settle into a cycle. We remember z at steps 1, 2,
-    # 4, 8, ... and if z ever comes back to the remembered value, it's caught
-    # in a loop and will never escape. Without this, every such point burns
-    # all $max_steps.
-    my ($x, $y) = (0, 0);
-    my ($seen_x, $seen_y, $next_check) = (0, 0, 1);
+    # Bounded orbits settle into a cycle. We remember z at steps 1, 2, 4,
+    # 8, ... and if z ever comes back to the remembered value, it's caught in a
+    # loop and will never escape. Without this, every such point burns all
+    # $max_steps.
+    my ($seen_x, $seen_y, $next_check) = ($x, $y, 1);
     for my $step (1 .. $max_steps) {
         ($x, $y) = ($x * $x - $y * $y + $cx, 2 * $x * $y + $cy);
         my $size = $x * $x + $y * $y;
@@ -401,6 +397,18 @@ sub mandelbrot_escape {
         }
     }
     return;
+}
+
+sub mandelbrot_escape {
+    my ($cx, $cy, $max_steps) = @_;
+
+    # Points in the main cardioid and the big bulb to its left never escape,
+    # and they're the slowest to check by iterating, so catch them up front.
+    my $q = ($cx - 0.25)**2 + $cy**2;
+    return if $q * ($q + $cx - 0.25) <= $cy**2 / 4;
+    return if ($cx + 1)**2 + $cy**2 <= 1 / 16;
+
+    return escape_time(0, 0, $cx, $cy, $max_steps);
 }
 
 # Far from the set it's nearly black, then it brightens through navy, blue and
@@ -424,6 +432,14 @@ my $MANDELBROT_ROWS = 24;
 # everything near the boundary takes longer to escape.
 sub mandelbrot_view {
     my (%view) = @_;
+    return escape_view(%view, glow => \@MANDELBROT_GLOW, escape => sub { mandelbrot_escape(@_, $view{max_steps}) });
+}
+
+# Draws any escape-time fractal. escape is called with a point's (x, y) and
+# returns its escape time, or nothing if it stays bounded; glow is the gradient
+# that escape times from glow_from to glow_to are spread over.
+sub escape_view {
+    my (%view) = @_;
     my ($center_x, $center_y, $half_height) = @view{qw(center_x center_y half_height)};
     my $pixel_rows = 2 * $MANDELBROT_ROWS;
     my $pixel_cols = 2 * $MANDELBROT_COLS;
@@ -441,19 +457,18 @@ sub mandelbrot_view {
     my $glow_from = log $view{glow_from};
     my $glow_span = log($view{glow_to}) - $glow_from;
     my @offsets   = map { my $dy = $_; map { [ $_, $dy ] } 1 / 6, 1 / 2, 5 / 6 } 1 / 6, 1 / 2, 5 / 6;
-    my @palette   = gradient_palette(\@MANDELBROT_GLOW);
+    my @palette   = gradient_palette($view{glow});
     my @rgb;
     for my $r (0 .. $pixel_rows - 1) {
         push @rgb, [ map {
             my $c = $_;
             my @colors = map {
                 my ($dx, $dy) = @$_;
-                my ($steps) = mandelbrot_escape(
+                my ($steps) = $view{escape}->(
                     $center_x + ($c + $dx - $pixel_cols / 2) * $step_x,
                     $center_y + $half_height - ($r + $dy) * $step_y,
-                    $view{max_steps},
                 );
-                defined $steps ? [ gradient_rgb(\@MANDELBROT_GLOW, (log($steps) - $glow_from) / $glow_span) ] : ();
+                defined $steps ? [ gradient_rgb($view{glow}, (log($steps) - $glow_from) / $glow_span) ] : ();
             } @offsets;
             @colors * 2 <= @offsets ? undef : average_rgb(@colors);
         } 0 .. $pixel_cols - 1 ];
@@ -504,10 +519,35 @@ sub seahorse_canvas {
     return $canvas;
 }
 
+# The Julia set for c = -0.123 + 0.745i, known as Douady's rabbit: a body with
+# two ears at every scale, because the critical point cycles with period 3.
+# It starts on palette color 25, a deep purple, because the blends between
+# black and purple have no good match in the palette and land on gray.
+my @JULIA_GLOW = (
+    [ 0,    46,  0,   71 ],
+    [ 0.35, 75,  0,   116 ],
+    [ 0.6,  150, 30,  200 ],
+    [ 0.8,  255, 120, 220 ],
+    [ 0.92, 255, 230, 250 ],
+    [ 1,    255, 255, 180 ],
+);
+
+sub julia_canvas {
+    my ($cx, $cy) = (-0.123, 0.745);
+    my $canvas = escape_view(
+        center_x  => 0, center_y => 0, half_height => 1.15,
+        glow_from => 2, glow_to  => 30, glow => \@JULIA_GLOW,
+        escape    => sub { escape_time(@_, $cx, $cy, 300) },
+    );
+    put_text($canvas, 22, 1, "z -> z^2 + c, c = $cx + ${cy}i", 97);
+    return $canvas;
+}
+
 our %PIECES = (
     mandelbrot => { draw => \&mandelbrot_canvas, about => 'the whole Mandelbrot set, glowing toward its edge' },
     seahorse   => { draw => \&seahorse_canvas,   about => 'a seahorse tail in Seahorse Valley, 600 times closer' },
     zeta       => { draw => \&zeta_canvas,       about => 'the path of zeta(1/2 + it) through its first three zeros' },
+    julia      => { draw => \&julia_canvas,      about => 'the Julia set called Douady\'s rabbit, ears within ears' },
 );
 
 sub piece_list { return join ' ', sort keys %PIECES }

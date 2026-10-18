@@ -220,6 +220,17 @@ subtest 'mandelbrot_escape' => sub {
     ok Time::HiRes::time() - $start < 1, 'and is recognized as cycling instead of iterated to the limit';
 };
 
+subtest 'escape_time' => sub {
+    # With c = 0 the map is z -> z^2, so anything inside the unit circle
+    # stays and anything outside runs away: the Julia set is the circle.
+    is_deeply [ escape_time(0.5, 0.5, 0, 0, 500) ], [], 'inside the unit circle stays bounded when c = 0';
+    ok defined escape_time(0.8, 0.7, 0, 0, 500), 'outside the unit circle escapes when c = 0';
+    is_deeply [ escape_time(0, 0, -0.123, 0.745, 1_000_000) ], [],
+        'the rabbit\'s critical point cycles, and is caught doing so';
+    is scalar escape_time(0, 0, 0.5, 0, 500), scalar mandelbrot_escape(0.5, 0, 500),
+        'starting from 0 it agrees with the Mandelbrot escape';
+};
+
 subtest 'gradient_palette' => sub {
     my @palette = gradient_palette([ [ 0, 255, 0, 0 ], [ 1, 0, 0, 255 ] ]);
     is $palette[0],  52, 'starts at the color the gradient starts on';
@@ -272,7 +283,7 @@ subtest 'cmd_math with no piece lists the pieces' => sub {
     my $server = FakeServer->new;
     my $item   = FakeItem->new;
     cmd_math('', $server, $item);
-    is_deeply $item->{printed}, [ [ 'math: pieces: mandelbrot seahorse zeta', 'CLIENTCRAP' ] ];
+    is_deeply $item->{printed}, [ [ 'math: pieces: julia mandelbrot seahorse zeta', 'CLIENTCRAP' ] ];
     is_deeply $server->{sent}, [], 'nothing was sent';
 };
 
@@ -297,6 +308,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
     cmd_math(' -l ', $server, $item);
     is_deeply $item->{printed}, [
         map { [ "math: $_", 'CLIENTCRAP' ] }
+            'julia       the Julia set called Douady\'s rabbit, ears within ears',
             'mandelbrot  the whole Mandelbrot set, glowing toward its edge',
             'seahorse    a seahorse tail in Seahorse Valley, 600 times closer',
             'zeta        the path of zeta(1/2 + it) through its first three zeros',
@@ -382,7 +394,7 @@ subtest 'things that change while a piece is drawing' => sub {
 subtest 'cmd_math refuses bad input' => sub {
     my $item = FakeItem->new;
     cmd_math('nope', FakeServer->new, $item);
-    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: mandelbrot seahorse zeta', 'CLIENTERROR' ] ],
+    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: julia mandelbrot seahorse zeta', 'CLIENTERROR' ] ],
         'unknown piece';
 
     @printed = ();
