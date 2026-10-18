@@ -234,7 +234,7 @@ subtest 'average_rgb' => sub {
 
 subtest 'pieces' => sub {
     for my $name (sort keys %PIECES) {
-        my $canvas = $PIECES{$name}->();
+        my $canvas = $PIECES{$name}{draw}->();
         my @lines  = irc_lines($canvas);
         ok @lines >= 10, "$name has a body";
 
@@ -291,6 +291,19 @@ sub finish_drawings {
     waitpid $_, 0 for splice @waiting_pids;
 }
 
+subtest 'cmd_math -l lists the pieces with what each one is' => sub {
+    my $server = FakeServer->new;
+    my $item   = $server->add_item(name => '#math');
+    cmd_math(' -l ', $server, $item);
+    is_deeply $item->{printed}, [
+        map { [ "math: $_", 'CLIENTCRAP' ] }
+            'mandelbrot  the whole Mandelbrot set, glowing toward its edge',
+            'seahorse    a seahorse tail in Seahorse Valley, 600 times closer',
+            'zeta        the path of zeta(1/2 + it) through its first three zeros',
+    ];
+    is_deeply $server->{sent}, [], 'nothing was sent';
+};
+
 subtest 'cmd_math draws in the background, then sends' => sub {
     %RENDERED = ();
     my $server = FakeServer->new;
@@ -337,7 +350,7 @@ subtest 'requests made while a piece is drawing share the drawing' => sub {
 };
 
 subtest 'a piece that fails to draw is reported' => sub {
-    local $PIECES{broken} = sub { die "boom\n" };
+    local $PIECES{broken} = { draw => sub { die "boom\n" } };
     my $server = FakeServer->new;
     my $item   = $server->add_item(name => '#math');
     cmd_math('broken', $server, $item);

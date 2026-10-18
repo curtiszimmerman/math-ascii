@@ -48,7 +48,8 @@ if ($view) {
     @args{qw(center_x center_y half_height max_steps glow_from glow_to)} = @numbers;
     $canvas_for = sub { mandelbrot_view(%args) };
 } else {
-    $canvas_for = $PIECES{$name} or die "no piece called \"$name\". pieces: @{[ sort keys %PIECES ]}\n";
+    my $piece = $PIECES{$name} or die "no piece called \"$name\". pieces: @{[ sort keys %PIECES ]}\n";
+    $canvas_for = $piece->{draw};
 }
 my $start  = Time::HiRes::time();
 my $canvas = $canvas_for->();

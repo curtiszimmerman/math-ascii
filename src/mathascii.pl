@@ -15,6 +15,7 @@ our %IRSSI = (
 );
 
 # Usage: /math              lists the pieces
+#        /math -l           lists the pieces with what each one is
 #        /math <piece>      sends the piece to the current channel or query
 #        /math -p <piece>   previews the piece in your window without sending
 #
@@ -503,9 +504,19 @@ sub seahorse_canvas {
     return $canvas;
 }
 
-our %PIECES = (mandelbrot => \&mandelbrot_canvas, seahorse => \&seahorse_canvas, zeta => \&zeta_canvas);
+our %PIECES = (
+    mandelbrot => { draw => \&mandelbrot_canvas, about => 'the whole Mandelbrot set, glowing toward its edge' },
+    seahorse   => { draw => \&seahorse_canvas,   about => 'a seahorse tail in Seahorse Valley, 600 times closer' },
+    zeta       => { draw => \&zeta_canvas,       about => 'the path of zeta(1/2 + it) through its first three zeros' },
+);
 
 sub piece_list { return join ' ', sort keys %PIECES }
+
+sub print_piece_descriptions {
+    my ($witem) = @_;
+    my $width = 2 + List::Util::max(map { length } keys %PIECES);
+    $witem->print(sprintf('math: %-*s%s', $width, $_, $PIECES{$_}{about}), MSGLEVEL_CLIENTCRAP) for sort keys %PIECES;
+}
 
 # Drawing a piece can take seconds, and irssi would freeze for all of it, so it
 # happens in a forked child that writes the finished lines back through a pipe.
@@ -528,6 +539,10 @@ sub cmd_math {
 
     if ($name eq '') {
         $witem->print('math: pieces: ' . piece_list(), MSGLEVEL_CLIENTCRAP);
+        return;
+    }
+    if ($name eq '-l') {
+        print_piece_descriptions($witem);
         return;
     }
     if (!$PIECES{$name}) {
@@ -564,7 +579,7 @@ sub start_drawing {
     if ($pid == 0) {
         close $reader;
         binmode $writer;
-        my @lines = eval { irc_lines($PIECES{$name}->()) };
+        my @lines = eval { irc_lines($PIECES{$name}{draw}->()) };
         print $writer $@ ? "error $@" : map { 'line ' . Encode::encode_utf8($_) . "\n" } @lines;
         close $writer;
 
