@@ -316,6 +316,12 @@ subtest 'fern_points' => sub {
     is_deeply [ fern_points(500) ], [ @points[ 0 .. 499 ] ], 'the same every time';
 };
 
+subtest 'chladni' => sub {
+    close_to chladni(1, 2, 0, 0.5), -1, 'worked by hand: cos 0 cos pi - cos 0 cos pi/2';
+    is_deeply [ grep { abs(chladni(3, 5, $_ / 10, $_ / 10)) > 1e-12 } 0 .. 10 ], [], 'the diagonal never moves';
+    close_to chladni(3, 5, 0.2, 0.7), -chladni(3, 5, 0.7, 0.2), 'swapping x and y flips the sign';
+};
+
 subtest 'harmonograph_points' => sub {
     my @points = harmonograph_points(20_000);
     is scalar @points, 20_000, 'one point per step';
@@ -448,7 +454,7 @@ subtest 'cmd_math with no piece lists the pieces' => sub {
     my $server = FakeServer->new;
     my $item   = FakeItem->new;
     cmd_math('', $server, $item);
-    is_deeply $item->{printed}, [ [ 'math: pieces: burningship dragon fern harmonograph hilbert julia lorenz mandelbrot newton pascal seahorse sunflower ulam zeta', 'CLIENTCRAP' ] ];
+    is_deeply $item->{printed}, [ [ 'math: pieces: burningship chladni dragon fern harmonograph hilbert julia lorenz mandelbrot newton pascal seahorse sunflower ulam zeta', 'CLIENTCRAP' ] ];
     is_deeply $server->{sent}, [], 'nothing was sent';
 };
 
@@ -474,6 +480,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
     is_deeply $item->{printed}, [
         map { [ "math: $_", 'CLIENTCRAP' ] }
             'burningship   the Burning Ship fractal, z^2 + c with the orbit folded',
+            'chladni       sand on a ringing metal plate, gathered on the lines that stand still',
             'dragon        the Heighway dragon, a strip of paper folded in half eight times',
             'fern          Barnsley\'s fern, grown from four random affine maps',
             'harmonograph  two damped pendulums drawing on paper, spiraling in as they tire',
@@ -569,7 +576,7 @@ subtest 'things that change while a piece is drawing' => sub {
 subtest 'cmd_math refuses bad input' => sub {
     my $item = FakeItem->new;
     cmd_math('nope', FakeServer->new, $item);
-    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: burningship dragon fern harmonograph hilbert julia lorenz mandelbrot newton pascal seahorse sunflower ulam zeta', 'CLIENTERROR' ] ],
+    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: burningship chladni dragon fern harmonograph hilbert julia lorenz mandelbrot newton pascal seahorse sunflower ulam zeta', 'CLIENTERROR' ] ],
         'unknown piece';
 
     @printed = ();

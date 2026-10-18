@@ -630,6 +630,59 @@ sub dragon_path {
     return @path;
 }
 
+# Chladni's plates: scatter sand on a square metal plate and bow its edge, and
+# the sand shakes off the parts that move and settles on the lines that stand
+# still. A simple model of how the plate moves at one of its notes is
+# cos(n pi x) cos(m pi y) - cos(m pi x) cos(n pi y), for x and y from 0 to 1,
+# and the sand gathers where that's zero.
+sub chladni {
+    my ($n, $m, $x, $y) = @_;
+    my $pi = 4 * atan2(1, 1);
+    return cos($n * $pi * $x) * cos($m * $pi * $y) - cos($m * $pi * $x) * cos($n * $pi * $y);
+}
+
+# The plate fills the left of the frame. Each pixel averages four samples of
+# how still the plate is there, and the stillest places glow like sand. The
+# stops are palette colors (23, 41, 65, 77) because blends between a dark
+# plate and sand otherwise land on grays.
+my @CHLADNI_SAND = (
+    [ 0,   0,   39,  71 ],
+    [ 0.5, 181, 99,  0 ],
+    [ 0.8, 255, 180, 89 ],
+    [ 1,   255, 211, 156 ],
+);
+
+sub chladni_canvas {
+    my ($n, $m) = (3, 5);
+    my ($side_cols, $pixel_rows) = (96, 48);
+    my @palette = gradient_palette(\@CHLADNI_SAND);
+    my @pixels  = map { [ ($BLACK) x 140 ] } 1 .. $pixel_rows;
+    for my $r (0 .. $pixel_rows - 1) {
+        for my $c (0 .. $side_cols - 1) {
+            my $stillness = List::Util::sum(map {
+                my ($dx, $dy) = @$_;
+                exp(-4 * abs(chladni($n, $m, ($c + $dx) / $side_cols, ($r + $dy) / $pixel_rows)));
+            } [ 0.25, 0.25 ], [ 0.75, 0.25 ], [ 0.25, 0.75 ], [ 0.75, 0.75 ]) / 4;
+            $pixels[$r][$c] = nearest_color_in(\@palette, gradient_rgb(\@CHLADNI_SAND, $stillness));
+        }
+    }
+    my $canvas = pixels_to_canvas(\@pixels);
+    my @text = (
+        [ 97, 'Chladni plate' ],
+        [ 88, '' ],
+        [ 94, 'sand on a ringing' ],
+        [ 94, 'square of metal' ],
+        [ 94, 'settles where it' ],
+        [ 94, 'stands still:' ],
+        [ 88, '' ],
+        [ 95, 'cos 3pi x cos 5pi y' ],
+        [ 95, '- cos 5pi x cos 3pi y' ],
+        [ 95, '= 0' ],
+    );
+    put_text($canvas, 7 + $_, 49, $text[$_][1], $text[$_][0]) for 0 .. $#text;
+    return $canvas;
+}
+
 # A harmonograph: one pendulum swings a pen across and another swings the
 # paper up and down, each slowly losing energy, so each direction is a damped
 # sine wave. Real ones often hang a second pendulum on an axis, so each
@@ -1092,6 +1145,7 @@ our %PIECES = (
     ulam       => { draw => \&ulam_canvas,       about => 'the Ulam spiral, where the primes line up on diagonals' },
     burningship => { draw => \&burningship_canvas, about => 'the Burning Ship fractal, z^2 + c with the orbit folded' },
     dragon     => { draw => \&dragon_canvas,     about => 'the Heighway dragon, a strip of paper folded in half eight times' },
+    chladni    => { draw => \&chladni_canvas,    about => 'sand on a ringing metal plate, gathered on the lines that stand still' },
     harmonograph => { draw => \&harmonograph_canvas, about => 'two damped pendulums drawing on paper, spiraling in as they tire' },
     sunflower  => { draw => \&sunflower_canvas,  about => 'seeds placed by the golden angle, falling into Fibonacci spirals' },
     hilbert    => { draw => \&hilbert_canvas,    about => 'the Hilbert curve, one line through all 256 squares of a grid' },
