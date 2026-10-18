@@ -16,6 +16,7 @@ our %IRSSI = (
 
 # Usage: /math              lists the pieces
 #        /math -l           lists the pieces with what each one is
+#        /math -h           shows this usage
 #        /math <piece>      sends the piece to the current channel or query
 #        /math -p <piece>   previews the piece in your window without sending
 #
@@ -1616,10 +1617,30 @@ our %PIECES = (
 
 sub piece_list { return join ' ', sort keys %PIECES }
 
-sub print_piece_descriptions {
-    my ($witem) = @_;
+sub piece_descriptions {
     my $width = 2 + List::Util::max(map { length } keys %PIECES);
-    $witem->print(sprintf('math: %-*s%s', $width, $_, $PIECES{$_}{about}), MSGLEVEL_CLIENTCRAP) for sort keys %PIECES;
+    return map { sprintf '%-*s%s', $width, $_, $PIECES{$_}{about} } sort keys %PIECES;
+}
+
+my @USAGE = (
+    'usage: /math              list the pieces',
+    '       /math -l           list the pieces with what each one is',
+    '       /math -h           show this help',
+    '       /math <piece>      send a piece to this channel or query',
+    '       /math -p <piece>   preview a piece here without sending it',
+);
+
+# Prints a line in the window the command came from, or in irssi's own
+# window (usually the status window) when it didn't come from a channel or
+# query.
+sub show {
+    my ($witem, $text, $level) = @_;
+    $level //= MSGLEVEL_CLIENTCRAP;
+    if ($witem) {
+        $witem->print("math: $text", $level);
+    } else {
+        Irssi::print("math: $text", $level);
+    }
 }
 
 # Drawing a piece can take seconds, and irssi would freeze for all of it, so it
@@ -1632,21 +1653,32 @@ my %drawing;
 sub cmd_math {
     my ($data, $server, $witem) = @_;
 
-    if (!$witem) {
-        Irssi::print('math: not in a channel or query window', MSGLEVEL_CLIENTERROR);
-        return;
-    }
-
     my $name = $data;
     $name =~ s/^\s+|\s+$//g;
     my $preview = $name =~ s/^-p\s+//;
 
+    # Listing and help don't need a channel, so they work from any window,
+    # the status window included.
     if ($name eq '') {
-        $witem->print('math: pieces: ' . piece_list(), MSGLEVEL_CLIENTCRAP);
+        show($witem, 'pieces: ' . piece_list());
         return;
     }
     if ($name eq '-l') {
-        print_piece_descriptions($witem);
+        show($witem, $_) for piece_descriptions();
+        return;
+    }
+    if ($name eq '-h') {
+        show($witem, $_) for @USAGE;
+        return;
+    }
+    if ($name =~ /^-/) {
+        show($witem, qq{unknown option "$name"}, MSGLEVEL_CLIENTERROR);
+        show($witem, $_) for @USAGE;
+        return;
+    }
+
+    if (!$witem) {
+        Irssi::print('math: not in a channel or query window', MSGLEVEL_CLIENTERROR);
         return;
     }
     if (!$PIECES{$name}) {

@@ -717,6 +717,14 @@ subtest 'things that change while a piece is drawing' => sub {
     is_deeply $item->{printed}[-1], [ 'math: not connected to a server', 'CLIENTERROR' ], 'and says why';
 };
 
+my @usage = (
+    'usage: /math              list the pieces',
+    '       /math -l           list the pieces with what each one is',
+    '       /math -h           show this help',
+    '       /math <piece>      send a piece to this channel or query',
+    '       /math -p <piece>   preview a piece here without sending it',
+);
+
 subtest 'cmd_math refuses bad input' => sub {
     my $item = FakeItem->new;
     cmd_math('nope', FakeServer->new, $item);
@@ -732,6 +740,37 @@ subtest 'cmd_math refuses bad input' => sub {
     cmd_math('zeta', FakeServer->new, undef);
     is_deeply \@printed, [ [ 'math: not in a channel or query window', 'CLIENTERROR' ] ],
         'no window item';
+
+    @printed = ();
+    cmd_math('-p zeta', FakeServer->new, undef);
+    is_deeply \@printed, [ [ 'math: not in a channel or query window', 'CLIENTERROR' ] ],
+        'previewing needs a window item too';
+
+    $item = FakeItem->new;
+    cmd_math('-x', FakeServer->new, $item);
+    is_deeply $item->{printed}, [ [ 'math: unknown option "-x"', 'CLIENTERROR' ], map { [ "math: $_", 'CLIENTCRAP' ] } @usage ],
+        'an unknown option shows the usage';
+};
+
+subtest 'cmd_math -h shows the usage' => sub {
+    my $item = FakeItem->new;
+    cmd_math(' -h ', FakeServer->new, $item);
+    is_deeply $item->{printed}, [ map { [ "math: $_", 'CLIENTCRAP' ] } @usage ];
+};
+
+subtest 'listing and help work outside a channel, in the status window' => sub {
+    @printed = ();
+    cmd_math('', undef, undef);
+    is_deeply \@printed, [ [ 'math: pieces: ' . piece_list(), 'CLIENTCRAP' ] ], 'the piece list';
+
+    @printed = ();
+    cmd_math('-l', undef, undef);
+    is scalar @printed, scalar keys %PIECES, 'the descriptions, one line a piece';
+    like $printed[0][0], qr/^math: apollonian +the Apollonian gasket/, 'in order';
+
+    @printed = ();
+    cmd_math('-h', undef, undef);
+    is_deeply \@printed, [ map { [ "math: $_", 'CLIENTCRAP' ] } @usage ], 'the usage';
 };
 
 done_testing;
