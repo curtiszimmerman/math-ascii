@@ -678,6 +678,75 @@ sub dragon_path {
     return @path;
 }
 
+# Follows z -> z^2 + c from 0 and, if z leaves the disk of radius 2 within
+# $max_steps, returns every point it passed through on the way out, as [x, y].
+# Points that stay return nothing.
+sub escaping_orbit {
+    my ($cx, $cy, $max_steps) = @_;
+    my ($x, $y) = (0, 0);
+    my @orbit;
+    for (1 .. $max_steps) {
+        ($x, $y) = ($x * $x - $y * $y + $cx, 2 * $x * $y + $cy);
+        return @orbit if $x * $x + $y * $y > 4;
+        push @orbit, [ $x, $y ];
+    }
+    return;
+}
+
+# The Buddhabrot: instead of coloring each c by whether it escapes, take every
+# c that does escape and mark each point its orbit passes through on the way
+# out. Piled up, the orbits draw a ghostly seated figure. It's stood upright
+# the usual way, with the real axis running down the frame (from -2.05 at the
+# top) and the imaginary axis across. Returns hit counts by "row,col", from
+# c sampled on a grid $density points to a unit. Each orbit is also mirrored
+# across the real axis, since conjugate c gives conjugate orbits, which
+# doubles the hits for free and keeps the figure symmetric.
+sub buddhabrot_hits {
+    my ($density) = @_;
+    my $rows_per_unit = 15;
+    my %hits;
+    for my $i (0 .. 3 * $density) {
+        my $cx = -2 + $i / $density;
+        for my $j (0 .. 1.5 * $density) {
+            my $cy = $j / $density;
+
+            # Points in the main cardioid and the big bulb never escape.
+            my $q = ($cx - 0.25)**2 + $cy**2;
+            next if $q * ($q + $cx - 0.25) <= $cy**2 / 4 || ($cx + 1)**2 + $cy**2 <= 1 / 16;
+
+            # Orbits that escape in a few steps mostly just mark the sampling
+            # grid near where they started, and wash the figure out in a flat
+            # box, so only the slow escapers near the set count.
+            my @orbit = escaping_orbit($cx, $cy, 200);
+            next if @orbit < 8;
+            for my $point (@orbit) {
+                my ($x, $y) = @$point;
+                my $row = int(($x + 2.05) * $rows_per_unit);
+                next if $row < 0 || $row > 47;
+                my $col = POSIX::floor(70 + $y * 2 * $rows_per_unit);
+                next if $col < 0 || $col > 139;
+                $hits{"$row,$col"}++;
+                $hits{ $row . ',' . (139 - $col) }++;
+            }
+        }
+    }
+    return \%hits;
+}
+
+# Deep blue through violet and pink to white, on palette colors (24, 37, 50,
+# 74, 98) so blends don't land on gray.
+my @BUDDHA_GLOW = (
+    [ 0,    0,   0,   71 ],
+    [ 0.25, 75,  0,   116 ],
+    [ 0.5,  181, 0,   181 ],
+    [ 0.75, 255, 102, 255 ],
+    [ 1,    255, 255, 255 ],
+);
+
+sub buddhabrot_canvas {
+    return density_canvas(buddhabrot_hits(150), \@BUDDHA_GLOW, 0.995, 0.5);
+}
+
 # The logistic map, x -> r x (1 - x), a toy model of a population that grows
 # but is held back by crowding. Returns $count values of x after letting it
 # settle for $settle steps from x = 0.5. For small r it settles on one value;
@@ -1420,6 +1489,7 @@ our %PIECES = (
     ulam       => { draw => \&ulam_canvas,       about => 'the Ulam spiral, where the primes line up on diagonals' },
     burningship => { draw => \&burningship_canvas, about => 'the Burning Ship fractal, z^2 + c with the orbit folded' },
     dragon     => { draw => \&dragon_canvas,     about => 'the Heighway dragon, a strip of paper folded in half eight times' },
+    buddhabrot => { draw => \&buddhabrot_canvas, about => 'the Buddhabrot: the paths of every point that escapes the Mandelbrot set' },
     logistic   => { draw => \&logistic_canvas,   about => 'the logistic map doubling its period over and over until it turns to chaos' },
     apollonian => { draw => \&apollonian_canvas, about => 'the Apollonian gasket, every gap between circles filled with another circle' },
     collatz    => { draw => \&collatz_canvas,    about => 'the Collatz coral: every trip down to 1, bending left on even, right on odd' },

@@ -316,6 +316,17 @@ subtest 'fern_points' => sub {
     is_deeply [ fern_points(500) ], [ @points[ 0 .. 499 ] ], 'the same every time';
 };
 
+subtest 'escaping_orbit' => sub {
+    is_deeply [ escaping_orbit(1, 0, 100) ], [ [ 1, 0 ], [ 2, 0 ] ], 'c = 1 passes through 1 and 2, then leaves at 5';
+    is_deeply [ escaping_orbit(0, 0, 100) ],  [], 'c = 0 never leaves, so it marks nothing';
+    is_deeply [ escaping_orbit(-2, 0, 100) ], [], 'nor does c = -2, which sits on the edge at 2 forever';
+
+    my $hits = buddhabrot_hits(60);
+    my @lopsided = grep { my ($r, $c) = split /,/; ($hits->{"$r,$c"} // 0) != ($hits->{ $r . ',' . (139 - $c) } // 0) } keys %$hits;
+    is_deeply \@lopsided, [], 'the picture is its own mirror image, since conjugate c gives conjugate orbits';
+    ok keys(%$hits) > 500, 'and lots of pixels get marked';
+};
+
 subtest 'logistic_orbit' => sub {
     my $distinct = sub { my %seen = map { sprintf('%.6f', $_) => 1 } @_; return sort keys %seen };
     is_deeply [ $distinct->(logistic_orbit(2.8, 1000, 100)) ], [ sprintf '%.6f', 1 - 1 / 2.8 ],
@@ -553,7 +564,7 @@ subtest 'cmd_math with no piece lists the pieces' => sub {
     my $server = FakeServer->new;
     my $item   = FakeItem->new;
     cmd_math('', $server, $item);
-    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian burningship chladni collatz dragon fern harmonograph hilbert julia koch logistic lorenz mandelbrot newton pascal seahorse sunflower timestable ulam zeta', 'CLIENTCRAP' ] ];
+    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian buddhabrot burningship chladni collatz dragon fern harmonograph hilbert julia koch logistic lorenz mandelbrot newton pascal seahorse sunflower timestable ulam zeta', 'CLIENTCRAP' ] ];
     is_deeply $server->{sent}, [], 'nothing was sent';
 };
 
@@ -579,6 +590,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
     is_deeply $item->{printed}, [
         map { [ "math: $_", 'CLIENTCRAP' ] }
             'apollonian    the Apollonian gasket, every gap between circles filled with another circle',
+            'buddhabrot    the Buddhabrot: the paths of every point that escapes the Mandelbrot set',
             'burningship   the Burning Ship fractal, z^2 + c with the orbit folded',
             'chladni       sand on a ringing metal plate, gathered on the lines that stand still',
             'collatz       the Collatz coral: every trip down to 1, bending left on even, right on odd',
@@ -680,7 +692,7 @@ subtest 'things that change while a piece is drawing' => sub {
 subtest 'cmd_math refuses bad input' => sub {
     my $item = FakeItem->new;
     cmd_math('nope', FakeServer->new, $item);
-    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian burningship chladni collatz dragon fern harmonograph hilbert julia koch logistic lorenz mandelbrot newton pascal seahorse sunflower timestable ulam zeta', 'CLIENTERROR' ] ],
+    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian buddhabrot burningship chladni collatz dragon fern harmonograph hilbert julia koch logistic lorenz mandelbrot newton pascal seahorse sunflower timestable ulam zeta', 'CLIENTERROR' ] ],
         'unknown piece';
 
     @printed = ();
