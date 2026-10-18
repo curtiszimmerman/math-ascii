@@ -1,6 +1,7 @@
 use strict;
 use warnings;
 
+use Encode ();
 use Irssi;
 use List::Util ();
 use POSIX ();
@@ -16,6 +17,9 @@ our %IRSSI = (
 # Usage: /math              lists the pieces
 #        /math <piece>      sends the piece to the current channel or query
 #        /math -p <piece>   previews the piece in your window without sending
+#
+# The first time a piece is asked for it's drawn in the background, which can
+# take a few seconds; after that it's sent straight away.
 #
 # Each line goes out as its own PRIVMSG. irssi paces them with its own flood
 # queue (the cmd_queue_speed and cmds_max_at_once settings), so a 25 line piece
@@ -503,6 +507,13 @@ our %PIECES = (mandelbrot => \&mandelbrot_canvas, seahorse => \&seahorse_canvas,
 
 sub piece_list { return join ' ', sort keys %PIECES }
 
+# Drawing a piece can take seconds, and irssi would freeze for all of it, so it
+# happens in a forked child that writes the finished lines back through a pipe.
+# Each piece is drawn once per session and kept in %RENDERED. Anyone asking for
+# a piece while it's being drawn waits in %drawing and gets it when it's done.
+our %RENDERED;
+my %drawing;
+
 sub cmd_math {
     my ($data, $server, $witem) = @_;
 
@@ -519,22 +530,110 @@ sub cmd_math {
         $witem->print('math: pieces: ' . piece_list(), MSGLEVEL_CLIENTCRAP);
         return;
     }
-    my $canvas_for = $PIECES{$name};
-    if (!$canvas_for) {
+    if (!$PIECES{$name}) {
         $witem->print(qq{math: no piece called "$name". pieces: } . piece_list(), MSGLEVEL_CLIENTERROR);
         return;
     }
-    my @lines = irc_lines($canvas_for->());
-
-    if ($preview) {
-        $witem->print($_, MSGLEVEL_CLIENTCRAP) for @lines;
-        return;
-    }
-    if (!$server || !$server->{connected}) {
+    if (!$preview && (!$server || !$server->{connected})) {
         Irssi::print('math: not connected to a server', MSGLEVEL_CLIENTERROR);
         return;
     }
-    $server->command("MSG $witem->{name} $_") for @lines;
+
+    my $request = { server_tag => $server && $server->{tag}, target => $witem->{name}, preview => $preview };
+    if (my $lines = $RENDERED{$name}) {
+        deliver($request, $lines);
+    } elsif ($drawing{$name}) {
+        push @{ $drawing{$name} }, $request;
+    } else {
+        $witem->print("math: drawing $name...", MSGLEVEL_CLIENTCRAP);
+        $drawing{$name} = [$request];
+        if (my $error = start_drawing($name)) {
+            delete $drawing{$name};
+            $witem->print("math: could not draw $name: $error", MSGLEVEL_CLIENTERROR);
+        }
+    }
+}
+
+# Returns an error message if the drawing couldn't be started.
+sub start_drawing {
+    my ($name) = @_;
+    pipe(my $reader, my $writer) or return "could not open a pipe: $!";
+    my $pid = fork;
+    return "could not fork: $!" if !defined $pid;
+
+    if ($pid == 0) {
+        close $reader;
+        binmode $writer;
+        my @lines = eval { irc_lines($PIECES{$name}->()) };
+        print $writer $@ ? "error $@" : map { 'line ' . Encode::encode_utf8($_) . "\n" } @lines;
+        close $writer;
+
+        # _exit skips the cleanup that belongs to irssi, which this copy of
+        # the process must not run.
+        POSIX::_exit(0);
+    }
+
+    close $writer;
+    Irssi::pidwait_add($pid);
+    my $drawing = { name => $name, reader => $reader, output => '' };
+    $drawing->{tag} = Irssi::input_add(fileno($reader), INPUT_READ, \&read_drawing, $drawing);
+    return;
+}
+
+sub read_drawing {
+    my ($drawing) = @_;
+    my $got = sysread $drawing->{reader}, my $chunk, 65536;
+    if ($got) {
+        $drawing->{output} .= $chunk;
+        return;
+    }
+
+    # The child closed its end, so the drawing is finished one way or another.
+    Irssi::input_remove($drawing->{tag});
+    close $drawing->{reader};
+    my $name     = $drawing->{name};
+    my $requests = delete $drawing{$name};
+
+    my (@lines, $error);
+    for (split /\n/, $drawing->{output}) {
+        push @lines, Encode::decode_utf8($1) if /^line (.*)/s;
+        $error = $1 if /^error (.*)/s;
+    }
+    $error //= 'the drawing process died' if !@lines;
+    if (defined $error) {
+        for my $request (@$requests) {
+            my (undef, $item) = request_window($request);
+            $item->print("math: could not draw $name: $error", MSGLEVEL_CLIENTERROR) if $item;
+        }
+        return;
+    }
+    $RENDERED{$name} = \@lines;
+    deliver($_, \@lines) for @$requests;
+}
+
+# Finds a request's server and window again. Either may have gone away while
+# the piece was drawing, so we never hold on to the objects themselves.
+sub request_window {
+    my ($request) = @_;
+    my $server = defined $request->{server_tag} ? Irssi::server_find_tag($request->{server_tag}) : undef;
+    my $item   = $server ? $server->window_item_find($request->{target}) : Irssi::window_item_find($request->{target});
+    return ($server, $item);
+}
+
+sub deliver {
+    my ($request, $lines) = @_;
+    my ($server, $item) = request_window($request);
+    return if !$item;
+
+    if ($request->{preview}) {
+        $item->print($_, MSGLEVEL_CLIENTCRAP) for @$lines;
+        return;
+    }
+    if (!$server->{connected}) {
+        $item->print('math: not connected to a server', MSGLEVEL_CLIENTERROR);
+        return;
+    }
+    $server->command("MSG $request->{target} $_") for @$lines;
 }
 
 Irssi::command_bind('math', 'cmd_math');

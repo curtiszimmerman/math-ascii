@@ -13,23 +13,42 @@ use FindBin;
 use Test::More;
 use Time::HiRes ();
 
-my (@printed, %commands);
+my (@printed, %commands, %servers, %inputs, @waiting_pids);
+my $next_tag = 0;
 
 BEGIN {
     $INC{'Irssi.pm'} = __FILE__;
     no strict 'refs';
     *{'main::MSGLEVEL_CLIENTERROR'} = sub { 'CLIENTERROR' };
     *{'main::MSGLEVEL_CLIENTCRAP'}  = sub { 'CLIENTCRAP' };
+    *{'main::INPUT_READ'}           = sub { 'READ' };
 }
 
 package Irssi {
-    sub print        { push @printed, [@_] }
-    sub command_bind { $commands{ $_[0] } = $_[1] }
+    sub print           { push @printed, [@_] }
+    sub command_bind    { $commands{ $_[0] } = $_[1] }
+    sub server_find_tag { $servers{ $_[0] } }
+    sub pidwait_add     { push @waiting_pids, $_[0] }
+    sub input_remove    { delete $inputs{ $_[0] } }
+
+    sub input_add {
+        my ($fd, $condition, $func, $data) = @_;
+        $inputs{ ++$next_tag } = [ $func, $data ];
+        return $next_tag;
+    }
 }
 
 package FakeServer {
-    sub new     { my ($class, %args) = @_; bless { connected => 1, sent => [], %args }, $class }
-    sub command { push @{ $_[0]{sent} }, $_[1] }
+    sub new {
+        my ($class, %args) = @_;
+        my $self = bless { connected => 1, sent => [], items => {}, tag => 'net' . ++$next_tag, %args }, $class;
+        $servers{ $self->{tag} } = $self;
+        return $self;
+    }
+    sub command          { push @{ $_[0]{sent} }, $_[1] }
+    sub window_item_find { $_[0]{items}{ $_[1] } }
+    sub add_item         { my ($self, %args) = @_; $self->{items}{ $args{name} } = FakeItem->new(%args) }
+    sub remove_item      { delete $_[0]{items}{ $_[1] } }
 }
 
 package FakeItem {
@@ -39,7 +58,7 @@ package FakeItem {
 
 package main;
 
-our ($ZETA_T_MAX, @ZETA_HUES, %PIECES, @QUADRANT);
+our ($ZETA_T_MAX, @ZETA_HUES, %PIECES, @QUADRANT, %RENDERED);
 my $script = "$FindBin::Bin/../src/mathascii.pl";
 do $script or die "could not load $script: " . ($@ || $!);
 
@@ -257,18 +276,94 @@ subtest 'cmd_math with no piece lists the pieces' => sub {
     is_deeply $server->{sent}, [], 'nothing was sent';
 };
 
-subtest 'cmd_math sends the piece to the window' => sub {
+# Plays the part of irssi's main loop: keeps handing each background drawing
+# its pipe until the drawing says it's done by removing its listener. The
+# drawings are real forked processes writing to real pipes.
+sub finish_drawings {
+    for (1 .. 100_000) {
+        last if !%inputs;
+        for my $tag (keys %inputs) {
+            my $input = $inputs{$tag} or next;
+            $input->[0]->($input->[1]);
+        }
+    }
+    fail 'drawings never finished' if %inputs;
+    waitpid $_, 0 for splice @waiting_pids;
+}
+
+subtest 'cmd_math draws in the background, then sends' => sub {
+    %RENDERED = ();
     my $server = FakeServer->new;
-    cmd_math(' zeta ', $server, FakeItem->new(name => '#math'));
-    is_deeply $server->{sent}, [ map { "MSG #math $_" } irc_lines(zeta_canvas()) ];
+    my $item   = $server->add_item(name => '#math');
+    cmd_math(' zeta ', $server, $item);
+    is_deeply $item->{printed}, [ [ 'math: drawing zeta...', 'CLIENTCRAP' ] ], 'says it is drawing';
+    is_deeply $server->{sent}, [], 'nothing goes out before the drawing is done';
+    finish_drawings();
+    is_deeply $server->{sent}, [ map { "MSG #math $_" } irc_lines(zeta_canvas()) ], 'then the piece goes out';
+};
+
+subtest 'a drawn piece is kept and sent straight away next time' => sub {
+    my $server = FakeServer->new;
+    my $item   = $server->add_item(name => '#math');
+    cmd_math('zeta', $server, $item);
+    is_deeply $server->{sent}, [ map { "MSG #math $_" } irc_lines(zeta_canvas()) ], 'sent at once';
+    is_deeply $item->{printed}, [], 'without drawing it again';
 };
 
 subtest 'cmd_math -p previews without sending' => sub {
+    %RENDERED = ();
     my $server = FakeServer->new;
-    my $item   = FakeItem->new;
+    my $item   = $server->add_item(name => '#math');
     cmd_math('-p zeta', $server, $item);
-    is_deeply $item->{printed}, [ map { [ $_, 'CLIENTCRAP' ] } irc_lines(zeta_canvas()) ];
+    finish_drawings();
+    is_deeply $item->{printed},
+        [ [ 'math: drawing zeta...', 'CLIENTCRAP' ], map { [ $_, 'CLIENTCRAP' ] } irc_lines(zeta_canvas()) ];
     is_deeply $server->{sent}, [], 'nothing was sent';
+};
+
+subtest 'requests made while a piece is drawing share the drawing' => sub {
+    %RENDERED = ();
+    my $server = FakeServer->new;
+    my $one    = $server->add_item(name => '#one');
+    my $two    = $server->add_item(name => '#two');
+    cmd_math('mandelbrot', $server, $one);
+    cmd_math('-p mandelbrot', $server, $two);
+    is scalar(keys %inputs), 1, 'only one drawing runs';
+    finish_drawings();
+
+    my @lines = irc_lines(mandelbrot_canvas());
+    is_deeply $server->{sent}, [ map { "MSG #one $_" } @lines ], 'the first request is sent';
+    is_deeply $two->{printed}, [ map { [ $_, 'CLIENTCRAP' ] } @lines ], 'the second is previewed';
+};
+
+subtest 'a piece that fails to draw is reported' => sub {
+    local $PIECES{broken} = sub { die "boom\n" };
+    my $server = FakeServer->new;
+    my $item   = $server->add_item(name => '#math');
+    cmd_math('broken', $server, $item);
+    finish_drawings();
+    is_deeply $item->{printed},
+        [ [ 'math: drawing broken...', 'CLIENTCRAP' ], [ 'math: could not draw broken: boom', 'CLIENTERROR' ] ];
+    is_deeply $server->{sent}, [], 'nothing was sent';
+    ok !exists $RENDERED{broken}, 'the failure is not kept';
+};
+
+subtest 'things that change while a piece is drawing' => sub {
+    %RENDERED = ();
+    my $server = FakeServer->new;
+    $server->add_item(name => '#gone');
+    cmd_math('zeta', $server, $server->window_item_find('#gone'));
+    $server->remove_item('#gone');
+    finish_drawings();
+    is_deeply $server->{sent}, [], 'a window closed meanwhile gets nothing';
+
+    %RENDERED = ();
+    my $item = $server->add_item(name => '#math');
+    cmd_math('zeta', $server, $item);
+    $server->{connected} = 0;
+    finish_drawings();
+    is_deeply $server->{sent}, [], 'a server that disconnected meanwhile gets nothing';
+    is_deeply $item->{printed}[-1], [ 'math: not connected to a server', 'CLIENTERROR' ], 'and says why';
 };
 
 subtest 'cmd_math refuses bad input' => sub {

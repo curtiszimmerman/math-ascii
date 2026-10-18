@@ -31,6 +31,7 @@ BEGIN {
     no strict 'refs';
     *{'main::MSGLEVEL_CLIENTERROR'} = sub { 0 };
     *{'main::MSGLEVEL_CLIENTCRAP'}  = sub { 0 };
+    *{'main::INPUT_READ'}           = sub { 0 };
     # Returns true because the script's last statement is its load result.
     *{'Irssi::command_bind'}        = sub { 1 };
 }
