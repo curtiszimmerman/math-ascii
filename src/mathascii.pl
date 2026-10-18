@@ -678,6 +678,59 @@ sub dragon_path {
     return @path;
 }
 
+# A phase portrait colors every point z of the plane by the angle of f(z):
+# red where f(z) points along the positive real axis, round the color wheel
+# through green and blue as the angle turns. Around a zero of f the colors go
+# round once (twice for a double zero), and around a pole they go round the
+# other way, so zeros and poles show up as pinwheels. This is the classic
+# example, f(z) = (z^2 - 1)(z - 2 - i)^2 / (z^2 + 2 + 2i), with zeros at 1,
+# -1 and a double zero at 2 + i, and poles at the square roots of -2 - 2i.
+sub phase_function {
+    my ($x, $y) = @_;
+    my $z      = [ $x, $y ];
+    my $square = c_mul($z, $z);
+    my $shift  = [ $x - 2, $y - 1 ];
+    my $top    = c_mul([ $square->[0] - 1, $square->[1] ], c_mul($shift, $shift));
+    my $bottom = [ $square->[0] + 2, $square->[1] + 2 ];
+    return @{ c_div($top, $bottom) };
+}
+
+# The color wheel, by angle from -pi to pi: red at 0, green a third of a turn
+# round, blue a third back.
+my @PHASE_WHEEL = (
+    [ 0,     255, 0,   0 ],
+    [ 1 / 6, 255, 255, 0 ],
+    [ 1 / 3, 0,   255, 0 ],
+    [ 1 / 2, 0,   255, 255 ],
+    [ 2 / 3, 0,   0,   255 ],
+    [ 5 / 6, 255, 0,   255 ],
+    [ 1,     255, 0,   0 ],
+);
+
+sub phase_wheel {
+    my ($angle) = @_;
+    my $turn = $angle / (8 * atan2(1, 1));
+    $turn += 1 if $turn < 0;
+    return gradient_rgb(\@PHASE_WHEEL, $turn);
+}
+
+# Each point gets the wheel color for the angle of f(z), snapped to the
+# twelve bright palette colors that go round the wheel (52 to 63), so each
+# pinwheel has twelve clean blades. Shading rings by |f| as well looked good
+# in principle but came out as ragged stripes at this size.
+sub phase_canvas {
+    my $canvas = sampled_view(
+        center_x => 0.3, center_y => 0, half_height => 2,
+        palette  => [ 52 .. 63 ],
+        color    => sub {
+            my ($re, $im) = phase_function(@_);
+            return [ phase_wheel(atan2($im, $re)) ];
+        },
+    );
+    put_text($canvas, 23, 1, 'f(z) = (z^2 - 1)(z - 2 - i)^2 / (z^2 + 2 + 2i)', 98);
+    return $canvas;
+}
+
 # Follows z -> z^2 + c from 0 and, if z leaves the disk of radius 2 within
 # $max_steps, returns every point it passed through on the way out, as [x, y].
 # Points that stay return nothing.
@@ -1489,6 +1542,7 @@ our %PIECES = (
     ulam       => { draw => \&ulam_canvas,       about => 'the Ulam spiral, where the primes line up on diagonals' },
     burningship => { draw => \&burningship_canvas, about => 'the Burning Ship fractal, z^2 + c with the orbit folded' },
     dragon     => { draw => \&dragon_canvas,     about => 'the Heighway dragon, a strip of paper folded in half eight times' },
+    phase      => { draw => \&phase_canvas,      about => 'a phase portrait: zeros and poles of a complex function as color pinwheels' },
     buddhabrot => { draw => \&buddhabrot_canvas, about => 'the Buddhabrot: the paths of every point that escapes the Mandelbrot set' },
     logistic   => { draw => \&logistic_canvas,   about => 'the logistic map doubling its period over and over until it turns to chaos' },
     apollonian => { draw => \&apollonian_canvas, about => 'the Apollonian gasket, every gap between circles filled with another circle' },

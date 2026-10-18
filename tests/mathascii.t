@@ -316,6 +316,25 @@ subtest 'fern_points' => sub {
     is_deeply [ fern_points(500) ], [ @points[ 0 .. 499 ] ], 'the same every time';
 };
 
+subtest 'phase_function' => sub {
+    my $size = sub { my ($re, $im) = phase_function(@_); return sqrt($re**2 + $im**2) };
+    ok $size->(@$_) < 1e-12, "vanishes at (@$_)" for [ 1, 0 ], [ -1, 0 ], [ 2, 1 ];
+
+    # The poles are the square roots of -2 - 2i: size 8^(1/4), angle -67.5 degrees.
+    my $pi = 4 * atan2(1, 1);
+    my ($px, $py) = (8**0.25 * cos(-3 * $pi / 8), 8**0.25 * sin(-3 * $pi / 8));
+    ok $size->($px + 1e-7, $py) > 1e5,  'blows up next to one pole';
+    ok $size->(-$px + 1e-7, -$py) > 1e5, 'and the other';
+};
+
+subtest 'phase_wheel' => sub {
+    my $pi = 4 * atan2(1, 1);
+    is_deeply [ map { int($_ + 0.5) } phase_wheel(0) ],              [ 255, 0, 0 ], 'angle 0 is red';
+    is_deeply [ map { int($_ + 0.5) } phase_wheel(2 * $pi / 3) ],   [ 0, 255, 0 ], 'a third of a turn is green';
+    is_deeply [ map { int($_ + 0.5) } phase_wheel(-2 * $pi / 3) ],  [ 0, 0, 255 ], 'a third back is blue';
+    is_deeply [ map { int($_ + 0.5) } phase_wheel($pi) ], [ map { int($_ + 0.5) } phase_wheel(-$pi) ], 'and it closes up';
+};
+
 subtest 'escaping_orbit' => sub {
     is_deeply [ escaping_orbit(1, 0, 100) ], [ [ 1, 0 ], [ 2, 0 ] ], 'c = 1 passes through 1 and 2, then leaves at 5';
     is_deeply [ escaping_orbit(0, 0, 100) ],  [], 'c = 0 never leaves, so it marks nothing';
@@ -564,7 +583,7 @@ subtest 'cmd_math with no piece lists the pieces' => sub {
     my $server = FakeServer->new;
     my $item   = FakeItem->new;
     cmd_math('', $server, $item);
-    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian buddhabrot burningship chladni collatz dragon fern harmonograph hilbert julia koch logistic lorenz mandelbrot newton pascal seahorse sunflower timestable ulam zeta', 'CLIENTCRAP' ] ];
+    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian buddhabrot burningship chladni collatz dragon fern harmonograph hilbert julia koch logistic lorenz mandelbrot newton pascal phase seahorse sunflower timestable ulam zeta', 'CLIENTCRAP' ] ];
     is_deeply $server->{sent}, [], 'nothing was sent';
 };
 
@@ -605,6 +624,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'mandelbrot    the whole Mandelbrot set, glowing toward its edge',
             'newton        Newton\'s method on z^3 - 1, three basins with a fractal border',
             'pascal        Pascal\'s triangle mod 2, which turns out to be Sierpinski\'s',
+            'phase         a phase portrait: zeros and poles of a complex function as color pinwheels',
             'seahorse      a seahorse tail in Seahorse Valley, 600 times closer',
             'sunflower     seeds placed by the golden angle, falling into Fibonacci spirals',
             'timestable    times tables drawn on a circle, where a cardioid and a nephroid appear',
@@ -692,7 +712,7 @@ subtest 'things that change while a piece is drawing' => sub {
 subtest 'cmd_math refuses bad input' => sub {
     my $item = FakeItem->new;
     cmd_math('nope', FakeServer->new, $item);
-    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian buddhabrot burningship chladni collatz dragon fern harmonograph hilbert julia koch logistic lorenz mandelbrot newton pascal seahorse sunflower timestable ulam zeta', 'CLIENTERROR' ] ],
+    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian buddhabrot burningship chladni collatz dragon fern harmonograph hilbert julia koch logistic lorenz mandelbrot newton pascal phase seahorse sunflower timestable ulam zeta', 'CLIENTERROR' ] ],
         'unknown piece';
 
     @printed = ();
