@@ -316,6 +316,41 @@ subtest 'fern_points' => sub {
     is_deeply [ fern_points(500) ], [ @points[ 0 .. 499 ] ], 'the same every time';
 };
 
+subtest 'apollonian_circles' => sub {
+    my @circles = apollonian_circles(0.04);
+    my @first   = map { $_->[0] } @circles[ 0 .. 3 ];
+    close_to List::Util::sum(@first)**2, 2 * List::Util::sum(map { $_**2 } @first),
+        'the starting four satisfy Descartes: (sum of k)^2 = 2 (sum of k^2)';
+
+    # Circles are [curvature, x, y]; the outer one has curvature -1.
+    my $gap = sub {
+        my ($a, $b) = @_;
+        my $distance = sqrt(($a->[1] - $b->[1])**2 + ($a->[2] - $b->[2])**2);
+        return $distance - abs(1 / $a->[0] + 1 / $b->[0]);
+    };
+    my @inner = grep { $_->[0] > 0 } @circles;
+    my @lonely = grep {
+        my $c = $_;
+        (grep { $_ != $c && abs($gap->($c, $_)) < 1e-9 } @circles) < 3;
+    } @inner;
+    is scalar @lonely, 0, 'every circle touches at least three others';
+    my @overlaps = grep {
+        my $i = $_;
+        grep { $gap->($inner[$i], $inner[$_]) < -1e-9 } $i + 1 .. $#inner;
+    } 0 .. $#inner;
+    is scalar @overlaps, 0, 'no two circles overlap';
+    # Against the outer circle the gap is d - (1 - r), which is at most 0
+    # for a circle inside it.
+    is_deeply [ grep { $gap->($circles[0], $_) > 1e-9 } @inner ], [], 'and they all sit inside the outer one';
+
+    # Halving the smallest radius allowed multiplies the number of circles by
+    # 2^d, where d is the gasket's fractal dimension, about 1.3057.
+    my $finer  = () = apollonian_circles(0.0005);
+    my $coarse = () = apollonian_circles(0.001);
+    ok abs(log($finer / $coarse) / log(2) - 1.3057) < 0.02, 'the count of circles grows at the fractal dimension, 1.3057'
+        or diag "$coarse -> $finer";
+};
+
 subtest 'collatz_sequence' => sub {
     is_deeply [ collatz_sequence(6) ], [ 6, 3, 10, 5, 16, 8, 4, 2, 1 ];
     is_deeply [ collatz_sequence(1) ], [1], '1 is already home';
@@ -507,7 +542,7 @@ subtest 'cmd_math with no piece lists the pieces' => sub {
     my $server = FakeServer->new;
     my $item   = FakeItem->new;
     cmd_math('', $server, $item);
-    is_deeply $item->{printed}, [ [ 'math: pieces: burningship chladni collatz dragon fern harmonograph hilbert julia koch lorenz mandelbrot newton pascal seahorse sunflower timestable ulam zeta', 'CLIENTCRAP' ] ];
+    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian burningship chladni collatz dragon fern harmonograph hilbert julia koch lorenz mandelbrot newton pascal seahorse sunflower timestable ulam zeta', 'CLIENTCRAP' ] ];
     is_deeply $server->{sent}, [], 'nothing was sent';
 };
 
@@ -532,6 +567,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
     cmd_math(' -l ', $server, $item);
     is_deeply $item->{printed}, [
         map { [ "math: $_", 'CLIENTCRAP' ] }
+            'apollonian    the Apollonian gasket, every gap between circles filled with another circle',
             'burningship   the Burning Ship fractal, z^2 + c with the orbit folded',
             'chladni       sand on a ringing metal plate, gathered on the lines that stand still',
             'collatz       the Collatz coral: every trip down to 1, bending left on even, right on odd',
@@ -632,7 +668,7 @@ subtest 'things that change while a piece is drawing' => sub {
 subtest 'cmd_math refuses bad input' => sub {
     my $item = FakeItem->new;
     cmd_math('nope', FakeServer->new, $item);
-    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: burningship chladni collatz dragon fern harmonograph hilbert julia koch lorenz mandelbrot newton pascal seahorse sunflower timestable ulam zeta', 'CLIENTERROR' ] ],
+    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian burningship chladni collatz dragon fern harmonograph hilbert julia koch lorenz mandelbrot newton pascal seahorse sunflower timestable ulam zeta', 'CLIENTERROR' ] ],
         'unknown piece';
 
     @printed = ();

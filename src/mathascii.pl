@@ -658,6 +658,68 @@ sub dragon_path {
     return @path;
 }
 
+# The Apollonian gasket: inside a circle put three equal circles that all
+# touch each other and it, then fill every curved gap with the biggest circle
+# that fits, and the new gaps the same way, forever. Circles are
+# [curvature, x, y], curvature being 1/radius, with the outer circle's
+# negative because the others touch it from the inside.
+#
+# Descartes' theorem says four mutually touching circles satisfy
+# (k1 + k2 + k3 + k4)^2 = 2 (k1^2 + k2^2 + k3^2 + k4^2). Given three circles,
+# that's a quadratic with two answers for the fourth: the circle we already
+# have on the other side of the gap, and the new one. The two answers add up
+# to 2 (k1 + k2 + k3), so the new one is 2 (k1 + k2 + k3) - k_old. Curvature
+# times center obeys the same rule, which gives the new center without
+# square roots or choosing signs.
+sub apollonian_circles {
+    my ($smallest) = @_;
+    my $pi    = 4 * atan2(1, 1);
+    my $k     = 1 + 2 / sqrt(3);
+    my $outer = [ -1, 0, 0 ];
+    my @three = map { [ $k, (1 - 1 / $k) * cos($pi / 2 + 2 * $pi * $_ / 3), (1 - 1 / $k) * sin($pi / 2 + 2 * $pi * $_ / 3) ] } 0 .. 2;
+    my @circles = ($outer, @three);
+
+    my $fill;
+    $fill = sub {
+        my ($a, $b, $c, $old) = @_;
+        my $new_k = 2 * ($a->[0] + $b->[0] + $c->[0]) - $old->[0];
+        return if 1 / $new_k < $smallest;
+        my $new = [ $new_k, map { my $i = $_; (2 * ($a->[0] * $a->[$i] + $b->[0] * $b->[$i] + $c->[0] * $c->[$i]) - $old->[0] * $old->[$i]) / $new_k } 1, 2 ];
+        push @circles, $new;
+        $fill->($a, $b, $new, $c);
+        $fill->($a, $c, $new, $b);
+        $fill->($b, $c, $new, $a);
+    };
+    my ($p, $q, $r) = @three;
+    $fill->($outer, $p, $q, $r);
+    $fill->($outer, $q, $r, $p);
+    $fill->($outer, $p, $r, $q);
+    $fill->($p, $q, $r, $outer);
+    undef $fill;    # it refers to itself, so break the loop for the garbage collector
+    return @circles;
+}
+
+# Each circle drawn as a thin glowing ring, colored by size: the big ones
+# violet, down through the rainbow to the tiniest in pink.
+sub apollonian_canvas {
+    my $scale   = 46;    # pixels per unit across, so the outer circle fills the height
+    my @circles = apollonian_circles(0.015);
+    my $biggest = log(List::Util::max(map { $_->[0] } @circles));
+    my $pi      = 4 * atan2(1, 1);
+    my @points;
+    for my $circle (@circles) {
+        my ($k, $x, $y) = @$circle;
+        my $radius   = 1 / abs $k;
+        my $position = $k < 0 ? 0 : log($k) / $biggest;
+        my $steps    = POSIX::ceil(4 * $pi * $radius * $scale) + 4;
+        push @points, map {
+            my $angle = 2 * $pi * $_ / $steps;
+            [ @{ centered_pixel($x + $radius * cos $angle, $y + $radius * sin $angle, $scale) }, $position ];
+        } 0 .. $steps;
+    }
+    return glow_lines_canvas(\@points, \@ZETA_HUES, 0.5);
+}
+
 # Scales a drawing to fill the frame, keeping its proportions, and returns a
 # function that takes a point (x, y) of the drawing, with y up, to fractional
 # [row, col] pixels. A unit is twice as many pixels across as rows down
@@ -1307,6 +1369,7 @@ our %PIECES = (
     ulam       => { draw => \&ulam_canvas,       about => 'the Ulam spiral, where the primes line up on diagonals' },
     burningship => { draw => \&burningship_canvas, about => 'the Burning Ship fractal, z^2 + c with the orbit folded' },
     dragon     => { draw => \&dragon_canvas,     about => 'the Heighway dragon, a strip of paper folded in half eight times' },
+    apollonian => { draw => \&apollonian_canvas, about => 'the Apollonian gasket, every gap between circles filled with another circle' },
     collatz    => { draw => \&collatz_canvas,    about => 'the Collatz coral: every trip down to 1, bending left on even, right on odd' },
     timestable => { draw => \&timestable_canvas, about => 'times tables drawn on a circle, where a cardioid and a nephroid appear' },
     koch       => { draw => \&koch_canvas,       about => 'the Koch snowflake, an infinitely long edge around a finite area' },
