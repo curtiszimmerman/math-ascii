@@ -630,6 +630,52 @@ sub dragon_path {
     return @path;
 }
 
+# Vogel's model of a sunflower head: seed n sits at n golden angles around
+# and sqrt(n) out, so every seed gets the same area. The golden angle is the
+# full turn cut in the golden ratio, about 137.5 degrees. Because it's as far
+# from any fraction as a number can be, no two seeds ever line up behind each
+# other, and the turns that come closest to lining up are Fibonacci numbers,
+# which is why the eye picks out 21 spirals one way and 34 the other.
+our $GOLDEN_ANGLE = 4 * atan2(1, 1) * (3 - sqrt 5);
+
+# $count seeds as [x, y], $spacing apart.
+sub sunflower_seeds {
+    my ($count, $spacing) = @_;
+    return map { [ $spacing * sqrt($_) * cos($_ * $GOLDEN_ANGLE), $spacing * sqrt($_) * sin($_ * $GOLDEN_ANGLE) ] } 1 .. $count;
+}
+
+# At this size the seeds alone are too few and too coarse for the eye to find
+# the spirals, so we draw them. With 150 seeds the spirals near the rim are
+# the 13 and the 21: every seed is joined to the seed 13 after it, making 13
+# gold spirals turning one way, and to the seed 21 after it, making 21 magenta
+# spirals turning the other. Each seed sits where two spirals cross. Near the
+# middle those same gaps would jump across the head, so joins much longer
+# than the seed spacing are left out. Too strict a cutoff and the two families
+# only meet in a thin ring instead of crossing all over the head.
+my @SUNFLOWER_HUES = ([ 0, 255, 190, 0 ], [ 1, 255, 40, 200 ]);
+
+sub sunflower_canvas {
+    my ($pixel_cols, $pixel_rows) = (140, 48);
+    my $spacing = 3.7;
+    my @seeds   = map { [ $pixel_rows / 2 - $_->[1] / 2 - 0.5, $pixel_cols / 2 + $_->[0] - 0.5 ] } sunflower_seeds(150, $spacing);
+    my @points;
+    for my $family ([ 13, 0 ], [ 21, 1 ]) {
+        my ($gap, $position) = @$family;
+        for my $n ($gap .. $#seeds) {
+            my ($from, $to) = @seeds[ $n - $gap, $n ];
+            next if ($to->[1] - $from->[1])**2 + (2 * ($to->[0] - $from->[0]))**2 > (2.6 * $spacing)**2;
+            my $steps = POSIX::ceil(abs($to->[1] - $from->[1]) + 2 * abs($to->[0] - $from->[0]));
+            push @points, map {
+                [ $from->[0] + ($to->[0] - $from->[0]) * $_ / $steps, $from->[1] + ($to->[1] - $from->[1]) * $_ / $steps, $position ]
+            } 0 .. $steps;
+        }
+    }
+    my @rgb = map { [ map { [ 0, 0, 0 ] } 1 .. $pixel_cols ] } 1 .. $pixel_rows;
+    draw_glow_curve(\@rgb, \@points, \@SUNFLOWER_HUES, 0.5);
+    my @palette = (gradient_palette(\@SUNFLOWER_HUES), $BLACK);
+    return pixels_to_canvas([ map { [ map { nearest_color_in(\@palette, @$_) } @$_ ] } @rgb ]);
+}
+
 # The Hilbert curve of the given order: one unbroken path through every cell
 # of a 2^order square grid, never crossing itself, from the bottom left corner
 # to the bottom right. Each cell's place along the path is turned into (x, y)
@@ -1010,6 +1056,7 @@ our %PIECES = (
     ulam       => { draw => \&ulam_canvas,       about => 'the Ulam spiral, where the primes line up on diagonals' },
     burningship => { draw => \&burningship_canvas, about => 'the Burning Ship fractal, z^2 + c with the orbit folded' },
     dragon     => { draw => \&dragon_canvas,     about => 'the Heighway dragon, a strip of paper folded in half eight times' },
+    sunflower  => { draw => \&sunflower_canvas,  about => 'seeds placed by the golden angle, falling into Fibonacci spirals' },
     hilbert    => { draw => \&hilbert_canvas,    about => 'the Hilbert curve, one line through all 256 squares of a grid' },
     fern       => { draw => \&fern_canvas,       about => 'Barnsley\'s fern, grown from four random affine maps' },
     pascal     => { draw => \&pascal_canvas,     about => 'Pascal\'s triangle mod 2, which turns out to be Sierpinski\'s' },

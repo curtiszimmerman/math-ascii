@@ -58,7 +58,7 @@ package FakeItem {
 
 package main;
 
-our ($ZETA_T_MAX, @ZETA_HUES, %PIECES, @QUADRANT, %RENDERED);
+our ($ZETA_T_MAX, @ZETA_HUES, %PIECES, @QUADRANT, %RENDERED, $GOLDEN_ANGLE);
 my $script = "$FindBin::Bin/../src/mathascii.pl";
 do $script or die "could not load $script: " . ($@ || $!);
 
@@ -316,6 +316,30 @@ subtest 'fern_points' => sub {
     is_deeply [ fern_points(500) ], [ @points[ 0 .. 499 ] ], 'the same every time';
 };
 
+subtest 'sunflower_seeds' => sub {
+    my $pi = 4 * atan2(1, 1);
+    close_to $GOLDEN_ANGLE * 180 / $pi, 137.50776405003785, 'the golden angle';
+
+    # How far k turns of the golden angle land from a whole number of turns.
+    my $miss = sub {
+        my $turns = $_[0] * $GOLDEN_ANGLE / (2 * $pi);
+        return 360 * abs($turns - int($turns + 0.5));
+    };
+    is_deeply [ grep { $miss->($_) < 10 } 1 .. 40 ], [ 21, 34 ],
+        'only Fibonacci numbers of turns come back close to where they started';
+
+    my @seeds = sunflower_seeds(1000, 1);
+    my @wedges = (0) x 8;
+    for my $seed (@seeds) {
+        my $angle = atan2($seed->[1], $seed->[0]);
+        $angle += 2 * $pi if $angle < 0;
+        $wedges[ int($angle / ($pi / 4)) % 8 ]++;
+    }
+    is_deeply [ grep { abs($_ - 125) > 6 } @wedges ], [], 'seeds spread evenly around the head'
+        or diag "@wedges";
+    close_to sqrt($seeds[99][0]**2 + $seeds[99][1]**2), 10, 'seed n sits at radius sqrt(n)';
+};
+
 subtest 'hilbert_path' => sub {
     for my $order (1, 3, 4) {
         my $side = 2**$order;
@@ -415,7 +439,7 @@ subtest 'cmd_math with no piece lists the pieces' => sub {
     my $server = FakeServer->new;
     my $item   = FakeItem->new;
     cmd_math('', $server, $item);
-    is_deeply $item->{printed}, [ [ 'math: pieces: burningship dragon fern hilbert julia lorenz mandelbrot newton pascal seahorse ulam zeta', 'CLIENTCRAP' ] ];
+    is_deeply $item->{printed}, [ [ 'math: pieces: burningship dragon fern hilbert julia lorenz mandelbrot newton pascal seahorse sunflower ulam zeta', 'CLIENTCRAP' ] ];
     is_deeply $server->{sent}, [], 'nothing was sent';
 };
 
@@ -450,6 +474,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'newton       Newton\'s method on z^3 - 1, three basins with a fractal border',
             'pascal       Pascal\'s triangle mod 2, which turns out to be Sierpinski\'s',
             'seahorse     a seahorse tail in Seahorse Valley, 600 times closer',
+            'sunflower    seeds placed by the golden angle, falling into Fibonacci spirals',
             'ulam         the Ulam spiral, where the primes line up on diagonals',
             'zeta         the path of zeta(1/2 + it) through its first three zeros',
     ];
@@ -534,7 +559,7 @@ subtest 'things that change while a piece is drawing' => sub {
 subtest 'cmd_math refuses bad input' => sub {
     my $item = FakeItem->new;
     cmd_math('nope', FakeServer->new, $item);
-    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: burningship dragon fern hilbert julia lorenz mandelbrot newton pascal seahorse ulam zeta', 'CLIENTERROR' ] ],
+    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: burningship dragon fern hilbert julia lorenz mandelbrot newton pascal seahorse sunflower ulam zeta', 'CLIENTERROR' ] ],
         'unknown piece';
 
     @printed = ();
