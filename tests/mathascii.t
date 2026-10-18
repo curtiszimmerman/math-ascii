@@ -316,6 +316,17 @@ subtest 'fern_points' => sub {
     is_deeply [ fern_points(500) ], [ @points[ 0 .. 499 ] ], 'the same every time';
 };
 
+subtest 'spirograph_points' => sub {
+    my $gap = sub { sqrt(($_[0][0] - $_[1][0])**2 + ($_[0][1] - $_[1][1])**2) };
+    for ([ 8, 5, 5, 5 ], [ 9, 6, 4, 2 ], [ 10, 4, 3, 2 ]) {
+        my ($R, $r, $d, $trips) = @$_;
+        my @points = spirograph_points($R, $r, $d, 600);
+        ok $gap->(@points[ 0, -1 ]) < 1e-9, "R=$R r=$r closes after $trips trips round the ring";
+        my @early = grep { $gap->($points[0], $points[ $_ * 600 / $trips ]) < 1e-6 } 1 .. $trips - 1;
+        is_deeply \@early, [], 'and not before';
+    }
+};
+
 subtest 'life' => sub {
     my $cells = sub { [ sort map { "@$_" } @_ ] };
     my $board = sub { my %alive = map { ("$_->[0],$_->[1]" => 1) } @_; return \%alive };
@@ -634,7 +645,7 @@ subtest 'cmd_math with no piece lists the pieces' => sub {
     my $server = FakeServer->new;
     my $item   = FakeItem->new;
     cmd_math('', $server, $item);
-    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian buddhabrot burningship chladni collatz dragon fern harmonograph hilbert julia koch life logistic lorenz mandelbrot newton pascal phase piwalk rule30 seahorse sunflower timestable ulam zeta', 'CLIENTCRAP' ] ];
+    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian buddhabrot burningship chladni collatz dragon fern harmonograph hilbert julia koch life logistic lorenz mandelbrot newton pascal phase piwalk rule30 seahorse spirograph sunflower timestable ulam zeta', 'CLIENTCRAP' ] ];
     is_deeply $server->{sent}, [], 'nothing was sent';
 };
 
@@ -680,6 +691,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'piwalk        a walk steered by the first thousand digits of pi',
             'rule30        Wolfram\'s rule 30, one cell growing into chaos',
             'seahorse      a seahorse tail in Seahorse Valley, 600 times closer',
+            'spirograph    a spirograph: a gear rolling inside a ring, pen near its rim',
             'sunflower     seeds placed by the golden angle, falling into Fibonacci spirals',
             'timestable    times tables drawn on a circle, where a cardioid and a nephroid appear',
             'ulam          the Ulam spiral, where the primes line up on diagonals',
@@ -774,7 +786,7 @@ my @usage = (
 subtest 'cmd_math refuses bad input' => sub {
     my $item = FakeItem->new;
     cmd_math('nope', FakeServer->new, $item);
-    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian buddhabrot burningship chladni collatz dragon fern harmonograph hilbert julia koch life logistic lorenz mandelbrot newton pascal phase piwalk rule30 seahorse sunflower timestable ulam zeta', 'CLIENTERROR' ] ],
+    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian buddhabrot burningship chladni collatz dragon fern harmonograph hilbert julia koch life logistic lorenz mandelbrot newton pascal phase piwalk rule30 seahorse spirograph sunflower timestable ulam zeta', 'CLIENTERROR' ] ],
         'unknown piece';
 
     @printed = ();

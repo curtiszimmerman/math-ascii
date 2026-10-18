@@ -679,6 +679,39 @@ sub dragon_path {
     return @path;
 }
 
+sub gcd {
+    my ($a, $b) = @_;
+    ($a, $b) = ($b, $a % $b) while $b;
+    return $a;
+}
+
+# A spirograph (a hypotrochoid): a gear of radius $r rolls round inside a ring
+# of radius $R, and the pen sits $d from the gear's center. The gear is back
+# where it started, facing the same way, after r / gcd(R, r) trips round the
+# ring, so that's where the curve closes. Returns $steps + 1 points [x, y]
+# evenly along the whole closed curve.
+sub spirograph_points {
+    my ($R, $r, $d, $steps) = @_;
+    my $turns = 8 * atan2(1, 1) * $r / gcd($R, $r);
+    return map {
+        my $t = $turns * $_ / $steps;
+        [ ($R - $r) * cos($t) + $d * cos(($R - $r) / $r * $t), ($R - $r) * sin($t) - $d * sin(($R - $r) / $r * $t) ];
+    } 0 .. $steps;
+}
+
+# A gear of 5 in a ring of 8, drawn as a glowing line whose hue runs once
+# round the rainbow over the whole curve. With the pen right at the gear's rim
+# it's a sharp star; a little way in, the points open into loops.
+sub spirograph_canvas {
+    my ($R, $r, $d) = (8, 5, 3);
+    my @path   = map { centered_pixel(@$_, 46 / ($R - $r + $d)) } spirograph_points($R, $r, $d, 3000);
+    my @points = map { line_points(@path[ $_ - 1, $_ ], $_ / $#path) } 1 .. $#path;
+    my $canvas = glow_lines_canvas(\@points, \@ZETA_HUES, 0.5);
+    put_text($canvas, 0, 1, "ring $R, gear $r, pen $d",            97);
+    put_text($canvas, 1, 1, "closes after $r trips",              94);
+    return $canvas;
+}
+
 # Conway's Game of Life on an unbounded board, kept as a hash of the live
 # cells by "x,y". A live cell survives with two or three live neighbors, and
 # a dead one comes alive with exactly three.
@@ -1723,6 +1756,7 @@ our %PIECES = (
     ulam       => { draw => \&ulam_canvas,       about => 'the Ulam spiral, where the primes line up on diagonals' },
     burningship => { draw => \&burningship_canvas, about => 'the Burning Ship fractal, z^2 + c with the orbit folded' },
     dragon     => { draw => \&dragon_canvas,     about => 'the Heighway dragon, a strip of paper folded in half eight times' },
+    spirograph => { draw => \&spirograph_canvas, about => 'a spirograph: a gear rolling inside a ring, pen near its rim' },
     life       => { draw => \&life_canvas,       about => 'Conway\'s Game of Life: a glider gun firing gliders, with trails' },
     rule30     => { draw => \&rule30_canvas,     about => 'Wolfram\'s rule 30, one cell growing into chaos' },
     piwalk     => { draw => \&piwalk_canvas,     about => 'a walk steered by the first thousand digits of pi' },
