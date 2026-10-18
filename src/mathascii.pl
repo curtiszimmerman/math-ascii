@@ -658,6 +658,43 @@ sub dragon_path {
     return @path;
 }
 
+# The Koch snowflake: start with a triangle, and on the middle third of every
+# edge raise a smaller triangle, again and again. Every round makes the edge
+# 4/3 as long, so in the limit the outline is infinitely long, though it
+# never gets outside a circle and the area only reaches 8/5 of the triangle.
+# Returns the corners in order, with the first repeated at the end to close it.
+sub koch_outline {
+    my ($order) = @_;
+    my $pi = 4 * atan2(1, 1);
+    my @outline = map { [ cos($pi / 2 - 2 * $pi * $_ / 3), sin($pi / 2 - 2 * $pi * $_ / 3) ] } 0 .. 3;
+    for (1 .. $order) {
+        my @finer = ($outline[0]);
+        for my $i (1 .. $#outline) {
+            my ($a, $b) = @outline[ $i - 1, $i ];
+            my ($dx, $dy) = (($b->[0] - $a->[0]) / 3, ($b->[1] - $a->[1]) / 3);
+            my $first  = [ $a->[0] + $dx,     $a->[1] + $dy ];
+            my $second = [ $a->[0] + 2 * $dx, $a->[1] + 2 * $dy ];
+
+            # The new tip is the middle third turned 60 degrees outward. The
+            # outline runs clockwise, so outward is a counterclockwise turn.
+            my $tip = [ $first->[0] + $dx / 2 - $dy * sqrt(3) / 2, $first->[1] + $dy / 2 + $dx * sqrt(3) / 2 ];
+            push @finer, $first, $tip, $second, $b;
+        }
+        @outline = @finer;
+    }
+    return @outline;
+}
+
+# The snowflake after four rounds, its outline glowing through the rainbow.
+sub koch_canvas {
+    my @outline = map { centered_pixel($_->[0], $_->[1] + 0.13, 42) } koch_outline(4);
+    my @points  = map { line_points(@outline[ $_ - 1, $_ ], $_ / $#outline) } 1 .. $#outline;
+    my $canvas  = glow_lines_canvas(\@points, \@ZETA_HUES, 0.6);
+    put_text($canvas, 22, 1, 'perimeter: infinite', 95);
+    put_text($canvas, 23, 1, 'area: 8/5 of the triangle', 95);
+    return $canvas;
+}
+
 # Chladni's plates: scatter sand on a square metal plate and bow its edge, and
 # the sand shakes off the parts that move and settles on the lines that stand
 # still. A simple model of how the plate moves at one of its notes is
@@ -1155,6 +1192,7 @@ our %PIECES = (
     ulam       => { draw => \&ulam_canvas,       about => 'the Ulam spiral, where the primes line up on diagonals' },
     burningship => { draw => \&burningship_canvas, about => 'the Burning Ship fractal, z^2 + c with the orbit folded' },
     dragon     => { draw => \&dragon_canvas,     about => 'the Heighway dragon, a strip of paper folded in half eight times' },
+    koch       => { draw => \&koch_canvas,       about => 'the Koch snowflake, an infinitely long edge around a finite area' },
     chladni    => { draw => \&chladni_canvas,    about => 'sand on a ringing metal plate, gathered on the lines that stand still' },
     harmonograph => { draw => \&harmonograph_canvas, about => 'two damped pendulums drawing on paper, spiraling in as they tire' },
     sunflower  => { draw => \&sunflower_canvas,  about => 'seeds placed by the golden angle, falling into Fibonacci spirals' },

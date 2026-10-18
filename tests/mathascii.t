@@ -316,6 +316,32 @@ subtest 'fern_points' => sub {
     is_deeply [ fern_points(500) ], [ @points[ 0 .. 499 ] ], 'the same every time';
 };
 
+subtest 'koch_outline' => sub {
+    my $length = sub { sqrt(($_[0][0] - $_[1][0])**2 + ($_[0][1] - $_[1][1])**2) };
+    my @perimeters;
+    for my $order (0 .. 4) {
+        my @outline = koch_outline($order);
+        is scalar @outline, 3 * 4**$order + 1, "order $order has 3 x 4^$order edges";
+        ok $length->(@outline[ 0, -1 ]) < 1e-9, "order $order closes on itself";
+        my @edges = map { $length->(@outline[ $_ - 1, $_ ]) } 1 .. $#outline;
+        ok((List::Util::max(@edges) - List::Util::min(@edges)) < 1e-9, "order $order has every edge the same length");
+        push @perimeters, List::Util::sum(@edges);
+    }
+    is_deeply [ grep { abs($perimeters[$_] / $perimeters[ $_ - 1 ] - 4 / 3) > 1e-9 } 1 .. 4 ], [],
+        'each order is 4/3 the perimeter of the last, so the limit is infinitely long';
+
+    # Shoelace area. The bumps must point out: inward ones would shrink it.
+    my $area = sub {
+        my @p = @_;
+        return abs(List::Util::sum(map { $p[ $_ - 1 ][0] * $p[$_][1] - $p[$_][0] * $p[ $_ - 1 ][1] } 1 .. $#p)) / 2;
+    };
+    my $triangle = $area->(koch_outline(0));
+    for my $order (1 .. 4) {
+        close_to $area->(koch_outline($order)) / $triangle, 1 + 3 / 5 * (1 - (4 / 9)**$order),
+            "order $order has 1 + 3/5 (1 - (4/9)^$order) of the triangle's area, heading for 8/5";
+    }
+};
+
 subtest 'chladni' => sub {
     close_to chladni(1, 2, 0, 0.5), -1, 'worked by hand: cos 0 cos pi - cos 0 cos pi/2';
     is_deeply [ grep { abs(chladni(3, 5, $_ / 10, $_ / 10)) > 1e-12 } 0 .. 10 ], [], 'the diagonal never moves';
@@ -454,7 +480,7 @@ subtest 'cmd_math with no piece lists the pieces' => sub {
     my $server = FakeServer->new;
     my $item   = FakeItem->new;
     cmd_math('', $server, $item);
-    is_deeply $item->{printed}, [ [ 'math: pieces: burningship chladni dragon fern harmonograph hilbert julia lorenz mandelbrot newton pascal seahorse sunflower ulam zeta', 'CLIENTCRAP' ] ];
+    is_deeply $item->{printed}, [ [ 'math: pieces: burningship chladni dragon fern harmonograph hilbert julia koch lorenz mandelbrot newton pascal seahorse sunflower ulam zeta', 'CLIENTCRAP' ] ];
     is_deeply $server->{sent}, [], 'nothing was sent';
 };
 
@@ -486,6 +512,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'harmonograph  two damped pendulums drawing on paper, spiraling in as they tire',
             'hilbert       the Hilbert curve, one line through all 256 squares of a grid',
             'julia         the Julia set called Douady\'s rabbit, ears within ears',
+            'koch          the Koch snowflake, an infinitely long edge around a finite area',
             'lorenz        the Lorenz attractor, the butterfly of chaos',
             'mandelbrot    the whole Mandelbrot set, glowing toward its edge',
             'newton        Newton\'s method on z^3 - 1, three basins with a fractal border',
@@ -576,7 +603,7 @@ subtest 'things that change while a piece is drawing' => sub {
 subtest 'cmd_math refuses bad input' => sub {
     my $item = FakeItem->new;
     cmd_math('nope', FakeServer->new, $item);
-    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: burningship chladni dragon fern harmonograph hilbert julia lorenz mandelbrot newton pascal seahorse sunflower ulam zeta', 'CLIENTERROR' ] ],
+    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: burningship chladni dragon fern harmonograph hilbert julia koch lorenz mandelbrot newton pascal seahorse sunflower ulam zeta', 'CLIENTERROR' ] ],
         'unknown piece';
 
     @printed = ();
