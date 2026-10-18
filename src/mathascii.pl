@@ -678,6 +678,62 @@ sub dragon_path {
     return @path;
 }
 
+# The first $count digits of pi, starting with the 3, by Rabinowitz and
+# Wagon's spigot: pi is written in a mixed-radix form whose "digits" are all
+# 2, and each round multiplies that by 10 and carries from right to left,
+# which pushes out the next decimal digit at the left end. The digit that
+# comes out can be 10, which means a carry into the digits already found, so
+# each digit is held back until the next one shows there's no carry, and any
+# run of 9s is held back with it, since a carry would turn them all to 0s.
+sub pi_digits {
+    my ($count) = @_;
+    my $length = int(10 * $count / 3) + 1;
+    my @mixed  = (2) x $length;
+    my ($held, $nines) = (undef, 0);
+    my @digits;
+    for (1 .. $count) {
+        my $carry = 0;
+        for my $i (reverse 1 .. $length) {
+            my $x = 10 * $mixed[ $i - 1 ] + $carry * $i;
+            $mixed[ $i - 1 ] = $x % (2 * $i - 1);
+            $carry = int($x / (2 * $i - 1));
+        }
+        $mixed[0] = $carry % 10;
+        my $digit = int($carry / 10);
+        if ($digit == 9) {
+            $nines++;
+        } elsif ($digit == 10) {
+            push @digits, $held + 1, (0) x $nines;
+            ($held, $nines) = (0, 0);
+        } else {
+            push @digits, $held if defined $held;
+            push @digits, (9) x $nines;
+            ($held, $nines) = ($digit, 0);
+        }
+    }
+    push @digits, $held, (9) x $nines;
+    return @digits[ 0 .. $count - 1 ];
+}
+
+# A walk steered by pi: each digit d is a step one unit long in direction
+# d tenths of a full turn. If pi's digits are as evenly mixed as everyone
+# believes (nobody has proved it), the walk wanders like a random one. The
+# hue runs along the walk from the 3 to the last digit.
+sub piwalk_canvas {
+    my $pi = 4 * atan2(1, 1);
+    my ($x, $y) = (0, 0);
+    my @path = ([ 0, 0 ]);
+    for my $digit (pi_digits(1000)) {
+        ($x, $y) = ($x + cos(2 * $pi * $digit / 10), $y + sin(2 * $pi * $digit / 10));
+        push @path, [ $x, $y ];
+    }
+    my $place  = fit_to_frame(\@path);
+    my @points = map { line_points($place->(@{ $path[ $_ - 1 ] }), $place->(@{ $path[$_] }), $_ / $#path) } 1 .. $#path;
+    my $canvas = glow_lines_canvas(\@points, \@ZETA_HUES, 0.5);
+    put_text($canvas, 23, 1, '3.14159265358979... each digit a direction', 97);
+    return $canvas;
+}
+
 # A phase portrait colors every point z of the plane by the angle of f(z):
 # red where f(z) points along the positive real axis, round the color wheel
 # through green and blue as the angle turns. Around a zero of f the colors go
@@ -1542,6 +1598,7 @@ our %PIECES = (
     ulam       => { draw => \&ulam_canvas,       about => 'the Ulam spiral, where the primes line up on diagonals' },
     burningship => { draw => \&burningship_canvas, about => 'the Burning Ship fractal, z^2 + c with the orbit folded' },
     dragon     => { draw => \&dragon_canvas,     about => 'the Heighway dragon, a strip of paper folded in half eight times' },
+    piwalk     => { draw => \&piwalk_canvas,     about => 'a walk steered by the first thousand digits of pi' },
     phase      => { draw => \&phase_canvas,      about => 'a phase portrait: zeros and poles of a complex function as color pinwheels' },
     buddhabrot => { draw => \&buddhabrot_canvas, about => 'the Buddhabrot: the paths of every point that escapes the Mandelbrot set' },
     logistic   => { draw => \&logistic_canvas,   about => 'the logistic map doubling its period over and over until it turns to chaos' },

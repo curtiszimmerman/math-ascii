@@ -316,6 +316,13 @@ subtest 'fern_points' => sub {
     is_deeply [ fern_points(500) ], [ @points[ 0 .. 499 ] ], 'the same every time';
 };
 
+subtest 'pi_digits' => sub {
+    my @digits = pi_digits(800);
+    is scalar @digits, 800, 'as many digits as asked for';
+    is join('', @digits[ 0 .. 49 ]), '31415926535897932384626433832795028841971693993751', 'the first fifty';
+    is join('', @digits[ 762 .. 767 ]), '999999', 'the Feynman point: six nines from decimal place 762';
+};
+
 subtest 'phase_function' => sub {
     my $size = sub { my ($re, $im) = phase_function(@_); return sqrt($re**2 + $im**2) };
     ok $size->(@$_) < 1e-12, "vanishes at (@$_)" for [ 1, 0 ], [ -1, 0 ], [ 2, 1 ];
@@ -583,7 +590,7 @@ subtest 'cmd_math with no piece lists the pieces' => sub {
     my $server = FakeServer->new;
     my $item   = FakeItem->new;
     cmd_math('', $server, $item);
-    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian buddhabrot burningship chladni collatz dragon fern harmonograph hilbert julia koch logistic lorenz mandelbrot newton pascal phase seahorse sunflower timestable ulam zeta', 'CLIENTCRAP' ] ];
+    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian buddhabrot burningship chladni collatz dragon fern harmonograph hilbert julia koch logistic lorenz mandelbrot newton pascal phase piwalk seahorse sunflower timestable ulam zeta', 'CLIENTCRAP' ] ];
     is_deeply $server->{sent}, [], 'nothing was sent';
 };
 
@@ -625,6 +632,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'newton        Newton\'s method on z^3 - 1, three basins with a fractal border',
             'pascal        Pascal\'s triangle mod 2, which turns out to be Sierpinski\'s',
             'phase         a phase portrait: zeros and poles of a complex function as color pinwheels',
+            'piwalk        a walk steered by the first thousand digits of pi',
             'seahorse      a seahorse tail in Seahorse Valley, 600 times closer',
             'sunflower     seeds placed by the golden angle, falling into Fibonacci spirals',
             'timestable    times tables drawn on a circle, where a cardioid and a nephroid appear',
@@ -712,7 +720,7 @@ subtest 'things that change while a piece is drawing' => sub {
 subtest 'cmd_math refuses bad input' => sub {
     my $item = FakeItem->new;
     cmd_math('nope', FakeServer->new, $item);
-    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian buddhabrot burningship chladni collatz dragon fern harmonograph hilbert julia koch logistic lorenz mandelbrot newton pascal phase seahorse sunflower timestable ulam zeta', 'CLIENTERROR' ] ],
+    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian buddhabrot burningship chladni collatz dragon fern harmonograph hilbert julia koch logistic lorenz mandelbrot newton pascal phase piwalk seahorse sunflower timestable ulam zeta', 'CLIENTERROR' ] ],
         'unknown piece';
 
     @printed = ();
