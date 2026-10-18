@@ -155,6 +155,11 @@ subtest 'draw_glow_curve' => sub {
     ok $rgb[5][9][2] > 0 && $rgb[5][9][2] < 255, 'it glows a little way off';
     is_deeply $rgb[5][15], [ 0, 0, 0 ], 'and leaves far pixels alone';
     is_deeply $rgb[9][5], [ 0, 0, 0 ], 'rows count double, since pixels are twice as tall as wide';
+
+    my @thin = map { [ map { [ 0, 0, 0 ] } 1 .. 20 ] } 1 .. 10;
+    draw_glow_curve(\@thin, [ [ 5, 5, 0 ] ], \@hues, 0.4);
+    is_deeply $thin[5][5], [ 255, 0, 0 ], 'a thinner line still has its hue at the center';
+    is_deeply $thin[5][7], [ 0, 0, 0 ], 'but stops sooner';
 };
 
 subtest 'lorenz_points' => sub {
@@ -311,6 +316,29 @@ subtest 'fern_points' => sub {
     is_deeply [ fern_points(500) ], [ @points[ 0 .. 499 ] ], 'the same every time';
 };
 
+subtest 'rotate_quarter_turns' => sub {
+    is_deeply rotate_quarter_turns([ 2, 1 ], 1),  [ -1, 2 ],  'a quarter turn counterclockwise';
+    is_deeply rotate_quarter_turns([ 2, 1 ], 2),  [ -2, -1 ], 'a half turn';
+    is_deeply rotate_quarter_turns([ 2, 1 ], -1), [ 1, -2 ],  'a quarter turn clockwise';
+    is_deeply rotate_quarter_turns([ 2, 1 ], 4),  [ 2, 1 ],   'a full turn comes back';
+};
+
+subtest 'dragon_path' => sub {
+    is join('', map { dragon_turn($_) > 0 ? 'L' : 'R' } 1 .. 8), 'LLRLLRRL', 'the first turns of the paper folding sequence';
+
+    for my $order (4, 7, 10) {
+        my @path = dragon_path($order);
+        is scalar @path, 2**$order + 1, "order $order has 2^$order segments";
+        my %edges;
+        my @reused = grep {
+            my ($a, $b) = sort map { "@$_" } @path[ $_ - 1, $_ ];
+            $edges{"$a|$b"}++;
+        } 1 .. $#path;
+        is_deeply \@reused, [], "order $order never runs along the same edge twice";
+        is $path[-1][0]**2 + $path[-1][1]**2, 2**$order, "order $order ends 2^($order/2) from the start";
+    }
+};
+
 subtest 'binomial_is_odd' => sub {
     # Build Pascal's triangle the slow way and compare.
     my @row = (1);
@@ -373,7 +401,7 @@ subtest 'cmd_math with no piece lists the pieces' => sub {
     my $server = FakeServer->new;
     my $item   = FakeItem->new;
     cmd_math('', $server, $item);
-    is_deeply $item->{printed}, [ [ 'math: pieces: burningship fern julia lorenz mandelbrot newton pascal seahorse ulam zeta', 'CLIENTCRAP' ] ];
+    is_deeply $item->{printed}, [ [ 'math: pieces: burningship dragon fern julia lorenz mandelbrot newton pascal seahorse ulam zeta', 'CLIENTCRAP' ] ];
     is_deeply $server->{sent}, [], 'nothing was sent';
 };
 
@@ -399,6 +427,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
     is_deeply $item->{printed}, [
         map { [ "math: $_", 'CLIENTCRAP' ] }
             'burningship  the Burning Ship fractal, z^2 + c with the orbit folded',
+            'dragon       the Heighway dragon, a strip of paper folded in half eight times',
             'fern         Barnsley\'s fern, grown from four random affine maps',
             'julia        the Julia set called Douady\'s rabbit, ears within ears',
             'lorenz       the Lorenz attractor, the butterfly of chaos',
@@ -490,7 +519,7 @@ subtest 'things that change while a piece is drawing' => sub {
 subtest 'cmd_math refuses bad input' => sub {
     my $item = FakeItem->new;
     cmd_math('nope', FakeServer->new, $item);
-    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: burningship fern julia lorenz mandelbrot newton pascal seahorse ulam zeta', 'CLIENTERROR' ] ],
+    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: burningship dragon fern julia lorenz mandelbrot newton pascal seahorse ulam zeta', 'CLIENTERROR' ] ],
         'unknown piece';
 
     @printed = ();

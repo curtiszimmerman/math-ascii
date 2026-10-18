@@ -291,18 +291,21 @@ sub glow_rgb {
 # list of closely spaced [row, col, position] points, in fractional pixels,
 # and each point's color is its position along the hues gradient. For every
 # pixel near the curve we find how close the curve comes; where the curve
-# crosses itself, the nearer strand wins.
+# crosses itself, the nearer strand wins. A width below 1 draws a thinner line
+# with a shorter glow, for curves whose strands run close together.
 sub draw_glow_curve {
-    my ($rgb, $points, $hues) = @_;
+    my ($rgb, $points, $hues, $width) = @_;
+    $width //= 1;
+    my $reach = $GLOW_REACH * $width;
     my ($rows, $cols) = (scalar @$rgb, scalar @{ $rgb->[0] });
     my (%distance, %position_at);
     for my $point (@$points) {
         my ($row, $col, $position) = @$point;
-        for my $r (POSIX::ceil($row - $GLOW_REACH / 2) .. POSIX::floor($row + $GLOW_REACH / 2)) {
+        for my $r (POSIX::ceil($row - $reach / 2) .. POSIX::floor($row + $reach / 2)) {
             next if $r < 0 || $r >= $rows;
-            for my $c (POSIX::ceil($col - $GLOW_REACH) .. POSIX::floor($col + $GLOW_REACH)) {
+            for my $c (POSIX::ceil($col - $reach) .. POSIX::floor($col + $reach)) {
                 next if $c < 0 || $c >= $cols;
-                my $d = sqrt(($c - $col)**2 + (2 * ($r - $row))**2);
+                my $d = sqrt(($c - $col)**2 + (2 * ($r - $row))**2) / $width;
                 next if exists $distance{"$r,$c"} && $distance{"$r,$c"} <= $d;
                 $distance{"$r,$c"}    = $d;
                 $position_at{"$r,$c"} = $position;
@@ -599,6 +602,78 @@ sub fern_canvas {
     put_text($canvas, 0, 34, "Barnsley's fern: four affine maps,", 97);
     put_text($canvas, 1, 34, 'one picked at random, over and over', 94);
     return $canvas;
+}
+
+# The Heighway dragon: fold a strip of paper in half again and again, open
+# every fold to a right angle, and look at it edge on. Turn n is left when n,
+# with its factors of 2 divided out, is one more than a multiple of 4, and
+# right otherwise. Returns 1 for left and -1 for right.
+sub dragon_turn {
+    my ($n) = @_;
+    $n /= 2 while $n % 2 == 0;
+    return $n % 4 == 1 ? 1 : -1;
+}
+
+# The corners of the dragon after $order folds, as [x, y] on a unit grid,
+# starting at the origin heading east.
+sub dragon_path {
+    my ($order) = @_;
+    my @directions = ([ 1, 0 ], [ 0, 1 ], [ -1, 0 ], [ 0, -1 ]);
+    my ($x, $y, $direction) = (1, 0, 0);
+    my @path = ([ 0, 0 ], [ 1, 0 ]);
+    for my $n (1 .. 2**$order - 1) {
+        $direction = ($direction + dragon_turn($n)) % 4;
+        $x += $directions[$direction][0];
+        $y += $directions[$direction][1];
+        push @path, [ $x, $y ];
+    }
+    return @path;
+}
+
+# Turns a point [x, y] counterclockwise about the origin by whole quarter
+# turns (negative for clockwise).
+sub rotate_quarter_turns {
+    my ($point, $turns) = @_;
+    my ($x, $y) = @$point;
+    ($x, $y) = (-$y, $x) for 1 .. $turns % 4;
+    return [ $x, $y ];
+}
+
+# The dragon scaled to fill the frame, drawn as a thin glowing line whose hue
+# runs along the strip from one end to the other. Each fold turns the dragon
+# 45 degrees, so it's turned back a quarter turn per two folds to lie wide.
+my $DRAGON_FOLDS = 8;
+
+sub dragon_canvas {
+    my ($pixel_cols, $pixel_rows) = (140, 48);
+    my @path = map { rotate_quarter_turns($_, -$DRAGON_FOLDS / 2) } dragon_path($DRAGON_FOLDS);
+    my @xs = map { $_->[0] } @path;
+    my @ys = map { $_->[1] } @path;
+    my ($min_x, $max_x) = (List::Util::min(@xs), List::Util::max(@xs));
+    my ($min_y, $max_y) = (List::Util::min(@ys), List::Util::max(@ys));
+
+    # A grid unit is 6 pixels across and 3 rows down, which is square since
+    # pixels are twice as tall as wide. Keeping that and the margins whole
+    # numbers puts every corner of the dragon on a pixel center. Otherwise a
+    # thin horizontal line can fall between two rows and vanish from both.
+    my $scale = 6;
+    my $left  = int(($pixel_cols - $scale * ($max_x - $min_x)) / 2);
+    my $top   = int(($pixel_rows - $scale / 2 * ($max_y - $min_y)) / 2);
+
+    # Several points per segment so the line has no gaps.
+    my @points;
+    for my $i (1 .. $#path) {
+        my ($from, $to) = @path[ $i - 1, $i ];
+        for my $step (0 .. 3) {
+            my $x = $from->[0] + ($to->[0] - $from->[0]) * $step / 4;
+            my $y = $from->[1] + ($to->[1] - $from->[1]) * $step / 4;
+            push @points, [ $top + ($max_y - $y) * $scale / 2, $left + ($x - $min_x) * $scale, $i / $#path ];
+        }
+    }
+    my @rgb = map { [ map { [ 0, 0, 0 ] } 1 .. $pixel_cols ] } 1 .. $pixel_rows;
+    draw_glow_curve(\@rgb, \@points, \@ZETA_HUES, 0.5);
+    my @palette = (gradient_palette(\@ZETA_HUES), $BLACK);
+    return pixels_to_canvas([ map { [ map { nearest_color_in(\@palette, @$_) } @$_ ] } @rgb ]);
 }
 
 # Whether the binomial coefficient C(n, k) is odd. By Lucas's theorem it is
@@ -899,6 +974,7 @@ our %PIECES = (
     newton     => { draw => \&newton_canvas,     about => 'Newton\'s method on z^3 - 1, three basins with a fractal border' },
     ulam       => { draw => \&ulam_canvas,       about => 'the Ulam spiral, where the primes line up on diagonals' },
     burningship => { draw => \&burningship_canvas, about => 'the Burning Ship fractal, z^2 + c with the orbit folded' },
+    dragon     => { draw => \&dragon_canvas,     about => 'the Heighway dragon, a strip of paper folded in half eight times' },
     fern       => { draw => \&fern_canvas,       about => 'Barnsley\'s fern, grown from four random affine maps' },
     pascal     => { draw => \&pascal_canvas,     about => 'Pascal\'s triangle mod 2, which turns out to be Sierpinski\'s' },
 );
