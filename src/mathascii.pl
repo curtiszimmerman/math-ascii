@@ -383,6 +383,59 @@ sub zeta_canvas {
     return [ @$title, @{ pixels_to_canvas(zeta_pixels()) }, @$footer ];
 }
 
+# Newton's method on z^3 - 1 slides z toward a root by following the tangent:
+# z -> z - (z^3 - 1) / 3z^2, which simplifies to 2z/3 + 1/(3z^2). Returns which
+# of the three cube roots of 1 it reaches (0 is 1 itself, then counting
+# counterclockwise) and in how many steps, or nothing if it doesn't settle.
+#
+# The step count is smoothed so shading is continuous rather than in bands.
+# Near a root the error roughly squares every step, so log(log(error)) grows
+# by log 2 a step, and how far the last step overshot the tolerance in those
+# terms gives the fraction.
+my @CUBE_ROOTS = ([ 1, 0 ], [ -0.5, sqrt(3) / 2 ], [ -0.5, -sqrt(3) / 2 ]);
+my $NEWTON_TOLERANCE = 1e-12;    # squared distance from the root
+
+sub newton_basin {
+    my ($x, $y, $max_steps) = @_;
+    my $previous = 1;
+    for my $step (1 .. $max_steps) {
+        my $size = ($x * $x + $y * $y)**2;    # |z^2|^2
+        return if $size == 0;
+        # 1/(3z^2) = conj(z^2) / (3 |z^2|^2)
+        my ($sq_x, $sq_y) = ($x * $x - $y * $y, 2 * $x * $y);
+        ($x, $y) = (2 * $x / 3 + $sq_x / (3 * $size), 2 * $y / 3 - $sq_y / (3 * $size));
+        my $nearest = List::Util::min(map { ($x - $_->[0])**2 + ($y - $_->[1])**2 } @CUBE_ROOTS);
+        if ($nearest < $NEWTON_TOLERANCE) {
+            my ($root) = grep { ($x - $CUBE_ROOTS[$_][0])**2 + ($y - $CUBE_ROOTS[$_][1])**2 == $nearest } 0 .. 2;
+            my $fraction = $previous < 1 ? log(log($NEWTON_TOLERANCE) / log($previous)) / log(2) : 0;
+            return ($root, $step - 1 + List::Util::min(1, $fraction));
+        }
+        $previous = $nearest;
+    }
+    return;
+}
+
+# Each root gets its own hue, bright where points reach it fast and dark
+# where they dither, which is along the fractal boundary between basins.
+my @NEWTON_HUES = (
+    [ [ 0, 255, 220, 120 ], [ 0.35, 255, 120, 0 ],   [ 0.7, 120, 0,  20 ],  [ 1, 0, 0, 0 ] ],
+    [ [ 0, 180, 255, 200 ], [ 0.35, 0,   200, 100 ], [ 0.7, 0,   70, 60 ],  [ 1, 0, 0, 0 ] ],
+    [ [ 0, 190, 190, 255 ], [ 0.35, 60,  80,  255 ], [ 0.7, 30,  0,  120 ], [ 1, 0, 0, 0 ] ],
+);
+
+sub newton_canvas {
+    my $canvas = sampled_view(
+        center_x => 0, center_y => 0, half_height => 1,
+        palette  => [ map { gradient_palette($_) } @NEWTON_HUES ],
+        color    => sub {
+            my ($root, $steps) = newton_basin(@_, 60);
+            return defined $root ? [ gradient_rgb($NEWTON_HUES[$root], ($steps - 2) / 8) ] : undef;
+        },
+    );
+    put_text($canvas, 23, 1, 'z -> z - (z^3 - 1) / 3z^2', 97);
+    return $canvas;
+}
+
 # The Lorenz system, dx/dt = 10(y - x), dy/dt = x(28 - z) - y,
 # dz/dt = xy - 8z/3: a simplified model of convection that never settles and
 # never repeats, looping around two wings in an order nobody can predict.
@@ -511,8 +564,37 @@ sub mandelbrot_view {
 
 # Draws any escape-time fractal. escape is called with a point's (x, y) and
 # returns its escape time, or nothing if it stays bounded; glow is the gradient
-# that escape times from glow_from to glow_to are spread over.
+# that escape times from glow_from to glow_to are spread over. Escape time goes
+# through log so the glow brightens at a steady pace from the far field in.
 sub escape_view {
+    my (%view) = @_;
+    my $glow_from = log $view{glow_from};
+    my $glow_span = log($view{glow_to}) - $glow_from;
+    return sampled_view(
+        %view,
+        palette => [ gradient_palette($view{glow}) ],
+        blur    => 1,
+        color   => sub {
+            my ($steps) = $view{escape}->(@_);
+            return defined $steps ? [ gradient_rgb($view{glow}, (log($steps) - $glow_from) / $glow_span) ] : undef;
+        },
+    );
+}
+
+# Draws a window onto the complex plane, given its center and half its height,
+# by calling color with each sample point's (x, y). It returns an [r, g, b]
+# color, or undef for points that belong to the black of a set.
+#
+# Each pixel takes a 3x3 grid of samples and is black when most of them are.
+# Otherwise it's the average color of the rest, which smooths over detail
+# finer than a pixel without mixing in black and going gray. Colors snap to
+# the given palette.
+#
+# With blur on, each colored pixel is also averaged with its colored
+# neighbors. Zoomed into a fractal, the boundary has detail far finer than a
+# pixel and neighbors flicker between bright and dark, which is noise to the
+# eye and costs a color code per flicker.
+sub sampled_view {
     my (%view) = @_;
     my ($center_x, $center_y, $half_height) = @view{qw(center_x center_y half_height)};
     my $pixel_rows = 2 * $MANDELBROT_ROWS;
@@ -523,48 +605,36 @@ sub escape_view {
     # twice as tall as wide, so pixels are twice as tall as wide too.
     my $step_x = $step_y / 2;
 
-    # Each pixel takes a 3x3 grid of samples and is black when most of them
-    # stay bounded. Otherwise it's the average color of the samples that
-    # escaped, which smooths over boundary detail finer than a pixel without
-    # mixing in the black of the set and going gray. Escape time goes through
-    # log so the glow brightens at a steady pace from the far field in.
-    my $glow_from = log $view{glow_from};
-    my $glow_span = log($view{glow_to}) - $glow_from;
-    my @offsets   = map { my $dy = $_; map { [ $_, $dy ] } 1 / 6, 1 / 2, 5 / 6 } 1 / 6, 1 / 2, 5 / 6;
-    my @palette   = gradient_palette($view{glow});
+    my @offsets = map { my $dy = $_; map { [ $_, $dy ] } 1 / 6, 1 / 2, 5 / 6 } 1 / 6, 1 / 2, 5 / 6;
     my @rgb;
     for my $r (0 .. $pixel_rows - 1) {
         push @rgb, [ map {
             my $c = $_;
-            my @colors = map {
+            my @colors = grep { defined } map {
                 my ($dx, $dy) = @$_;
-                my ($steps) = $view{escape}->(
+                $view{color}->(
                     $center_x + ($c + $dx - $pixel_cols / 2) * $step_x,
                     $center_y + $half_height - ($r + $dy) * $step_y,
                 );
-                defined $steps ? [ gradient_rgb($view{glow}, (log($steps) - $glow_from) / $glow_span) ] : ();
             } @offsets;
             @colors * 2 <= @offsets ? undef : average_rgb(@colors);
         } 0 .. $pixel_cols - 1 ];
     }
 
-    # Zoomed in, the boundary has detail far finer than a pixel and neighbors
-    # flicker between bright and dark, which is noise to the eye and costs a
-    # color code per flicker. Blurring each escaped pixel with its escaped
-    # neighbors calms that down; pixels in the set stay black so the shape
-    # keeps its edge.
     my @pixels;
     for my $r (0 .. $pixel_rows - 1) {
         push @pixels, [ map {
             my $c = $_;
             if (!$rgb[$r][$c]) {
                 $BLACK;
+            } elsif (!$view{blur}) {
+                nearest_color_in($view{palette}, @{ $rgb[$r][$c] });
             } else {
                 my @near = grep { $_ } map {
                     my $nr = $_;
                     map { $nr >= 0 && $nr < $pixel_rows && $_ >= 0 && $_ < $pixel_cols ? $rgb[$nr][$_] : undef } $c - 1 .. $c + 1;
                 } $r - 1 .. $r + 1;
-                nearest_color_in(\@palette, @{ average_rgb(@near) });
+                nearest_color_in($view{palette}, @{ average_rgb(@near) });
             }
         } 0 .. $pixel_cols - 1 ];
     }
@@ -623,6 +693,7 @@ our %PIECES = (
     zeta       => { draw => \&zeta_canvas,       about => 'the path of zeta(1/2 + it) through its first three zeros' },
     julia      => { draw => \&julia_canvas,      about => 'the Julia set called Douady\'s rabbit, ears within ears' },
     lorenz     => { draw => \&lorenz_canvas,     about => 'the Lorenz attractor, the butterfly of chaos' },
+    newton     => { draw => \&newton_canvas,     about => 'Newton\'s method on z^3 - 1, three basins with a fractal border' },
 );
 
 sub piece_list { return join ' ', sort keys %PIECES }

@@ -253,6 +253,28 @@ subtest 'escape_time' => sub {
         'starting from 0 it agrees with the Mandelbrot escape';
 };
 
+subtest 'newton_basin' => sub {
+    my ($root, $steps) = newton_basin(2, 0, 100);
+    is $root, 0, 'z = 2 slides to the root at 1';
+    is +(newton_basin(-1, sqrt 3, 100))[0], 1, 'a point out along the second root\'s ray goes to it';
+    is +(newton_basin(-1, -sqrt 3, 100))[0], 2, 'and likewise the third';
+    is_deeply [ newton_basin(0, 0, 100) ], [], 'z = 0 has no tangent to follow and goes nowhere';
+
+    # Rotating the start by a third of a turn rotates the whole iteration, so
+    # it lands on the next root after just as many steps.
+    my ($x, $y) = (0.3, 0.9);
+    my ($c, $s) = (cos(2 * 3.14159265358979 / 3), sin(2 * 3.14159265358979 / 3));
+    my ($root_a, $steps_a) = newton_basin($x, $y, 100);
+    my ($root_b, $steps_b) = newton_basin($x * $c - $y * $s, $x * $s + $y * $c, 100);
+    is $root_b, ($root_a + 1) % 3, 'turning the start a third of a turn moves to the next root';
+    ok abs($steps_b - $steps_a) < 1e-6, 'in the same number of steps';
+
+    my @steps = map { (newton_basin($_, 0, 100))[1] } 1.01, 1.1, 1.5, 3, 10;
+    is_deeply [ sort { $a <=> $b } @steps ], \@steps, 'farther from the root takes longer';
+    ok abs((newton_basin(1.5, 0, 100))[1] - (newton_basin(1.5001, 0, 100))[1]) < 0.01,
+        'the step count is smooth, not whole steps';
+};
+
 subtest 'gradient_palette' => sub {
     my @palette = gradient_palette([ [ 0, 255, 0, 0 ], [ 1, 0, 0, 255 ] ]);
     is $palette[0],  52, 'starts at the color the gradient starts on';
@@ -305,7 +327,7 @@ subtest 'cmd_math with no piece lists the pieces' => sub {
     my $server = FakeServer->new;
     my $item   = FakeItem->new;
     cmd_math('', $server, $item);
-    is_deeply $item->{printed}, [ [ 'math: pieces: julia lorenz mandelbrot seahorse zeta', 'CLIENTCRAP' ] ];
+    is_deeply $item->{printed}, [ [ 'math: pieces: julia lorenz mandelbrot newton seahorse zeta', 'CLIENTCRAP' ] ];
     is_deeply $server->{sent}, [], 'nothing was sent';
 };
 
@@ -333,6 +355,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'julia       the Julia set called Douady\'s rabbit, ears within ears',
             'lorenz      the Lorenz attractor, the butterfly of chaos',
             'mandelbrot  the whole Mandelbrot set, glowing toward its edge',
+            'newton      Newton\'s method on z^3 - 1, three basins with a fractal border',
             'seahorse    a seahorse tail in Seahorse Valley, 600 times closer',
             'zeta        the path of zeta(1/2 + it) through its first three zeros',
     ];
@@ -417,7 +440,7 @@ subtest 'things that change while a piece is drawing' => sub {
 subtest 'cmd_math refuses bad input' => sub {
     my $item = FakeItem->new;
     cmd_math('nope', FakeServer->new, $item);
-    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: julia lorenz mandelbrot seahorse zeta', 'CLIENTERROR' ] ],
+    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: julia lorenz mandelbrot newton seahorse zeta', 'CLIENTERROR' ] ],
         'unknown piece';
 
     @printed = ();
