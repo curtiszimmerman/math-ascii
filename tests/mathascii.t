@@ -11,6 +11,7 @@ use warnings;
 use Encode ();
 use FindBin;
 use Test::More;
+use Time::HiRes ();
 
 my (@printed, %commands);
 
@@ -179,17 +180,37 @@ subtest 'pixels_to_canvas' => sub {
 
 subtest 'mandelbrot_escape' => sub {
     for my $x (0, 0.24, -1, -1.9) {
-        is mandelbrot_escape($x, 0, 500), undef, "c = $x stays bounded";
+        is_deeply [ mandelbrot_escape($x, 0, 500) ], [], "c = $x stays bounded";
     }
-    is mandelbrot_escape(-0.5, 0.5, 500), undef, 'a point inside the main cardioid stays bounded';
+    is_deeply [ mandelbrot_escape(-0.5, 0.5, 500) ], [], 'a point inside the main cardioid stays bounded';
     for my $x (0.26, 0.5, 1, -2.05) {
         ok defined mandelbrot_escape($x, 0, 500), "c = $x escapes";
     }
-    my @times = map { mandelbrot_escape($_, 0, 500) } 0.26, 0.3, 0.5, 1, 2;
+
+    my @times = map { scalar mandelbrot_escape($_, 0, 500) } 0.26, 0.3, 0.5, 1, 2;
     is_deeply [ sort { $b <=> $a } @times ], \@times,
         'escape time shrinks steadily moving away from the set';
     ok abs(mandelbrot_escape(0.5, 0, 500) - mandelbrot_escape(0.5001, 0, 500)) < 0.01,
         'escape time is smooth, not stepped';
+
+    # c = -1.3 sits in the period-4 bulb, outside the cardioid and big-bulb
+    # shortcuts. Iterating all ten million steps would take many seconds, so
+    # finishing fast means the cycle check caught it.
+    my $start = Time::HiRes::time();
+    is_deeply [ mandelbrot_escape(-1.3, 0, 10_000_000) ], [], 'c = -1.3 stays bounded';
+    ok Time::HiRes::time() - $start < 1, 'and is recognized as cycling instead of iterated to the limit';
+};
+
+subtest 'gradient_palette' => sub {
+    my @palette = gradient_palette([ [ 0, 255, 0, 0 ], [ 1, 0, 0, 255 ] ]);
+    is $palette[0],  52, 'starts at the color the gradient starts on';
+    is $palette[-1], 60, 'ends at the color the gradient ends on';
+    my %seen;
+    is_deeply [ grep { $seen{$_}++ } @palette ], [], 'lists each color once';
+};
+
+subtest 'average_rgb' => sub {
+    is_deeply average_rgb([ 0, 10, 200 ], [ 100, 30, 0 ]), [ 50, 20, 100 ];
 };
 
 subtest 'pieces' => sub {
@@ -232,7 +253,7 @@ subtest 'cmd_math with no piece lists the pieces' => sub {
     my $server = FakeServer->new;
     my $item   = FakeItem->new;
     cmd_math('', $server, $item);
-    is_deeply $item->{printed}, [ [ 'math: pieces: mandelbrot zeta', 'CLIENTCRAP' ] ];
+    is_deeply $item->{printed}, [ [ 'math: pieces: mandelbrot seahorse zeta', 'CLIENTCRAP' ] ];
     is_deeply $server->{sent}, [], 'nothing was sent';
 };
 
@@ -253,7 +274,7 @@ subtest 'cmd_math -p previews without sending' => sub {
 subtest 'cmd_math refuses bad input' => sub {
     my $item = FakeItem->new;
     cmd_math('nope', FakeServer->new, $item);
-    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: mandelbrot zeta', 'CLIENTERROR' ] ],
+    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: mandelbrot seahorse zeta', 'CLIENTERROR' ] ],
         'unknown piece';
 
     @printed = ();

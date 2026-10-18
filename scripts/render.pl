@@ -2,12 +2,15 @@
 # Renders a mathascii piece outside irssi, for checking the art and timing it.
 #
 # Usage: scripts/render.pl [--plain] [--time] [--png FILE] <piece>
+#        scripts/render.pl [...] --mandelbrot CX,CY,HALF_HEIGHT,MAX_STEPS,GLOW_FROM,GLOW_TO
 #
 #   (default)   prints the raw IRC lines, color codes and all
 #   --plain     strips the color codes so you can see the shape
 #   --time      reports how long the render took on stderr
 #   --png FILE  also draws the piece as it would look in a client, using
 #               ImageMagick and DejaVu Sans Mono, so you can see the colors
+#   --mandelbrot  renders any Mandelbrot view instead of a named piece, for
+#               hunting down new zooms. The numbers are mandelbrot_view's.
 use strict;
 use warnings;
 
@@ -16,10 +19,11 @@ use FindBin;
 use Getopt::Long;
 use Time::HiRes ();
 
-my ($plain, $time, $png);
-GetOptions('plain' => \$plain, 'time' => \$time, 'png=s' => \$png) && @ARGV == 1
-    or die "usage: $0 [--plain] [--time] [--png FILE] <piece>\n";
-my $name = $ARGV[0];
+my ($plain, $time, $png, $view);
+GetOptions('plain' => \$plain, 'time' => \$time, 'png=s' => \$png, 'mandelbrot=s' => \$view)
+    && @ARGV == ($view ? 0 : 1)
+    or die "usage: $0 [--plain] [--time] [--png FILE] <piece | --mandelbrot CX,CY,HALF_HEIGHT,MAX_STEPS,GLOW_FROM,GLOW_TO>\n";
+my $name = $view ? "mandelbrot view $view" : $ARGV[0];
 
 # The script talks to irssi when it loads. Outside irssi these do nothing.
 BEGIN {
@@ -35,7 +39,16 @@ our (%PIECES, @QUADRANT, %RGB);
 my $script = "$FindBin::Bin/../src/mathascii.pl";
 do $script or die "could not load $script: " . ($@ || $!);
 
-my $canvas_for = $PIECES{$name} or die "no piece called \"$name\". pieces: @{[ sort keys %PIECES ]}\n";
+my $canvas_for;
+if ($view) {
+    my @numbers = split /,/, $view;
+    @numbers == 6 or die "--mandelbrot needs six comma-separated numbers, got \"$view\"\n";
+    my %args;
+    @args{qw(center_x center_y half_height max_steps glow_from glow_to)} = @numbers;
+    $canvas_for = sub { mandelbrot_view(%args) };
+} else {
+    $canvas_for = $PIECES{$name} or die "no piece called \"$name\". pieces: @{[ sort keys %PIECES ]}\n";
+}
 my $start  = Time::HiRes::time();
 my $canvas = $canvas_for->();
 my @lines  = irc_lines($canvas);

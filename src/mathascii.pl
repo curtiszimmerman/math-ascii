@@ -67,20 +67,38 @@ sub color_distance {
 }
 
 # The palette color closest to an RGB color.
+sub nearest_color { return nearest_color_in([ sort { $a <=> $b } keys %RGB ], @_) }
+
+# The color closest to an RGB color out of a chosen few.
 my %nearest_cache;
 
-sub nearest_color {
-    my @want = map { int($_ + 0.5) } @_;
-    my $key  = join ',', @want;
+sub nearest_color_in {
+    my ($codes, @rgb) = @_;
+    my @want = map { int($_ + 0.5) } @rgb;
+    my $key  = join ',', @want, @$codes;
     return $nearest_cache{$key} if exists $nearest_cache{$key};
 
     my ($best, $best_distance);
-    for my $code (sort { $a <=> $b } keys %RGB) {
+    for my $code (@$codes) {
         my @have = rgb($code);
         my $distance = ($have[0] - $want[0])**2 + ($have[1] - $want[1])**2 + ($have[2] - $want[2])**2;
         ($best, $best_distance) = ($code, $distance) if !defined $best || $distance < $best_distance;
     }
     return $nearest_cache{$key} = $best;
+}
+
+# The palette colors a gradient passes closest to, from start to end. Snapping
+# to only these keeps blended colors from landing on some unrelated hue that
+# happens to be nearby, which looks like noise and costs a color code.
+sub gradient_palette {
+    my ($stops) = @_;
+    my %seen;
+    return grep { !$seen{$_}++ } map { nearest_color(gradient_rgb($stops, $_ / 100)) } 0 .. 100;
+}
+
+sub average_rgb {
+    my @colors = @_;
+    return [ map { my $i = $_; List::Util::sum(map { $_->[$i] } @colors) / @colors } 0 .. 2 ];
 }
 
 # The RGB color at a position along a gradient. Stops are
@@ -348,26 +366,36 @@ sub zeta_canvas {
     return [ @$title, @{ pixels_to_canvas(zeta_pixels()) }, @$footer ];
 }
 
-# How long z -> z^2 + c, starting from z = 0, takes to run away, or undef if it
-# never does within $max_steps. The count is smoothed (the standard
-# n + 1 - log2(log|z|) trick with a big escape radius) so colors blend instead
-# of falling into bands.
+# Follows z -> z^2 + c from z = 0. If z runs away within $max_steps, returns
+# how long it took; otherwise returns nothing. The step count is smoothed (the
+# standard n + 1 - log2(log|z|) trick with a big escape radius) so colors blend
+# instead of falling into bands.
 sub mandelbrot_escape {
     my ($cx, $cy, $max_steps) = @_;
 
     # Points in the main cardioid and the big bulb to its left never escape,
     # and they're the slowest to check by iterating, so catch them up front.
     my $q = ($cx - 0.25)**2 + $cy**2;
-    return undef if $q * ($q + $cx - 0.25) <= $cy**2 / 4;
-    return undef if ($cx + 1)**2 + $cy**2 <= 1 / 16;
+    return if $q * ($q + $cx - 0.25) <= $cy**2 / 4;
+    return if ($cx + 1)**2 + $cy**2 <= 1 / 16;
 
+    # Other bounded points settle into a cycle. We remember z at steps 1, 2,
+    # 4, 8, ... and if z ever comes back to the remembered value, it's caught
+    # in a loop and will never escape. Without this, every such point burns
+    # all $max_steps.
     my ($x, $y) = (0, 0);
+    my ($seen_x, $seen_y, $next_check) = (0, 0, 1);
     for my $step (1 .. $max_steps) {
         ($x, $y) = ($x * $x - $y * $y + $cx, 2 * $x * $y + $cy);
         my $size = $x * $x + $y * $y;
         return $step + 1 - log(log($size) / 2) / log(2) if $size > 65536;
+        return if abs($x - $seen_x) < 1e-13 && abs($y - $seen_y) < 1e-13;
+        if ($step == $next_check) {
+            ($seen_x, $seen_y) = ($x, $y);
+            $next_check *= 2;
+        }
     }
-    return undef;
+    return;
 }
 
 # Far from the set it's nearly black, then it brightens through navy, blue and
@@ -381,14 +409,17 @@ my @MANDELBROT_GLOW = (
     [ 1,    255, 170, 0 ],
 );
 
-# The escape time that reaches the brightest end of the glow.
-my $MANDELBROT_GLOW_STEPS = 60;
+my $MANDELBROT_COLS = 70;
+my $MANDELBROT_ROWS = 24;
 
-our $MANDELBROT_COLS = 70;
-our $MANDELBROT_ROWS = 24;
-
-sub mandelbrot_canvas {
-    my ($center_x, $center_y, $half_height) = (-0.75, 0, 1.15);
+# Draws a window onto the Mandelbrot set as a canvas. The view is given by its
+# center, half its height in the complex plane, and how many steps to iterate
+# before calling a point bounded. Escape times from glow_from to glow_to are
+# spread over the glow gradient; zoomed views need a higher range because
+# everything near the boundary takes longer to escape.
+sub mandelbrot_view {
+    my (%view) = @_;
+    my ($center_x, $center_y, $half_height) = @view{qw(center_x center_y half_height)};
     my $pixel_rows = 2 * $MANDELBROT_ROWS;
     my $pixel_cols = 2 * $MANDELBROT_COLS;
     my $step_y     = 2 * $half_height / $pixel_rows;
@@ -397,36 +428,78 @@ sub mandelbrot_canvas {
     # twice as tall as wide, so pixels are twice as tall as wide too.
     my $step_x = $step_y / 2;
 
-    # Each pixel takes a 2x2 grid of samples. It's black when most of them
-    # stay bounded, and otherwise colored by their average escape time, which
-    # smooths the color without muddying the boundary toward gray. Escape time
-    # goes through log so the glow brightens at a steady pace from the far
-    # field in to the boundary.
-    my $max_steps = 300;
+    # Each pixel takes a 3x3 grid of samples and is black when most of them
+    # stay bounded. Otherwise it's the average color of the samples that
+    # escaped, which smooths over boundary detail finer than a pixel without
+    # mixing in the black of the set and going gray. Escape time goes through
+    # log so the glow brightens at a steady pace from the far field in.
+    my $glow_from = log $view{glow_from};
+    my $glow_span = log($view{glow_to}) - $glow_from;
+    my @offsets   = map { my $dy = $_; map { [ $_, $dy ] } 1 / 6, 1 / 2, 5 / 6 } 1 / 6, 1 / 2, 5 / 6;
+    my @palette   = gradient_palette(\@MANDELBROT_GLOW);
+    my @rgb;
+    for my $r (0 .. $pixel_rows - 1) {
+        push @rgb, [ map {
+            my $c = $_;
+            my @colors = map {
+                my ($dx, $dy) = @$_;
+                my ($steps) = mandelbrot_escape(
+                    $center_x + ($c + $dx - $pixel_cols / 2) * $step_x,
+                    $center_y + $half_height - ($r + $dy) * $step_y,
+                    $view{max_steps},
+                );
+                defined $steps ? [ gradient_rgb(\@MANDELBROT_GLOW, (log($steps) - $glow_from) / $glow_span) ] : ();
+            } @offsets;
+            @colors * 2 <= @offsets ? undef : average_rgb(@colors);
+        } 0 .. $pixel_cols - 1 ];
+    }
+
+    # Zoomed in, the boundary has detail far finer than a pixel and neighbors
+    # flicker between bright and dark, which is noise to the eye and costs a
+    # color code per flicker. Blurring each escaped pixel with its escaped
+    # neighbors calms that down; pixels in the set stay black so the shape
+    # keeps its edge.
     my @pixels;
     for my $r (0 .. $pixel_rows - 1) {
         push @pixels, [ map {
             my $c = $_;
-            my @escapes = grep { defined } map {
-                my ($dx, $dy) = @$_;
-                mandelbrot_escape(
-                    $center_x + ($c + $dx - $pixel_cols / 2) * $step_x,
-                    $center_y + $half_height - ($r + $dy) * $step_y,
-                    $max_steps,
-                );
-            } [ 0.25, 0.25 ], [ 0.75, 0.25 ], [ 0.25, 0.75 ], [ 0.75, 0.75 ];
-            my $mean = @escapes ? List::Util::sum(@escapes) / @escapes : 0;
-            @escapes >= 2
-                ? nearest_color(gradient_rgb(\@MANDELBROT_GLOW, log($mean) / log($MANDELBROT_GLOW_STEPS)))
-                : $BLACK;
+            if (!$rgb[$r][$c]) {
+                $BLACK;
+            } else {
+                my @near = grep { $_ } map {
+                    my $nr = $_;
+                    map { $nr >= 0 && $nr < $pixel_rows && $_ >= 0 && $_ < $pixel_cols ? $rgb[$nr][$_] : undef } $c - 1 .. $c + 1;
+                } $r - 1 .. $r + 1;
+                nearest_color_in(\@palette, @{ average_rgb(@near) });
+            }
         } 0 .. $pixel_cols - 1 ];
     }
-    my $canvas = pixels_to_canvas(\@pixels);
+    return pixels_to_canvas(\@pixels);
+}
+
+sub mandelbrot_canvas {
+    my $canvas = mandelbrot_view(
+        center_x  => -0.75, center_y => 0, half_height => 1.15,
+        max_steps => 300,   glow_from => 1, glow_to => 60,
+    );
     put_text($canvas, $MANDELBROT_ROWS / 2, 39, 'z -> z^2 + c', 98);
     return $canvas;
 }
 
-our %PIECES = (mandelbrot => \&mandelbrot_canvas, zeta => \&zeta_canvas);
+# Seahorse Valley is the crack between the main cardioid and the big bulb to
+# its left, where the boundary curls into spirals that look like seahorse
+# tails. This frames one tail about 600 times closer than the full view.
+sub seahorse_canvas {
+    my $canvas = mandelbrot_view(
+        center_x  => -0.7453, center_y  => 0.1127, half_height => 0.0015,
+        max_steps => 1500,    glow_from => 40,     glow_to     => 160,
+    );
+    put_text($canvas, 9,  1, 'seahorse valley', 97);
+    put_text($canvas, 10, 1, '-0.7453+0.1127i', 94);
+    return $canvas;
+}
+
+our %PIECES = (mandelbrot => \&mandelbrot_canvas, seahorse => \&seahorse_canvas, zeta => \&zeta_canvas);
 
 sub piece_list { return join ' ', sort keys %PIECES }
 
