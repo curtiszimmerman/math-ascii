@@ -316,6 +316,15 @@ subtest 'fern_points' => sub {
     is_deeply [ fern_points(500) ], [ @points[ 0 .. 499 ] ], 'the same every time';
 };
 
+subtest 'times_table_chords' => sub {
+    is_deeply [ times_table_chords(10, 2) ], [ map { [ $_, 2 * $_ % 10 ] } 1 .. 9 ], 'k joins 2k mod 10, skipping 0 which joins itself';
+    for ([ 200, 2, 1 ], [ 200, 3, 2 ], [ 200, 21, 20 ]) {
+        my ($n, $m, $fixed) = @$_;
+        is scalar(my @chords = times_table_chords($n, $m)), $n - $fixed,
+            "k -> ${m}k mod $n leaves out the $fixed points where (m - 1)k is a multiple of $n";
+    }
+};
+
 subtest 'koch_outline' => sub {
     my $length = sub { sqrt(($_[0][0] - $_[1][0])**2 + ($_[0][1] - $_[1][1])**2) };
     my @perimeters;
@@ -480,7 +489,7 @@ subtest 'cmd_math with no piece lists the pieces' => sub {
     my $server = FakeServer->new;
     my $item   = FakeItem->new;
     cmd_math('', $server, $item);
-    is_deeply $item->{printed}, [ [ 'math: pieces: burningship chladni dragon fern harmonograph hilbert julia koch lorenz mandelbrot newton pascal seahorse sunflower ulam zeta', 'CLIENTCRAP' ] ];
+    is_deeply $item->{printed}, [ [ 'math: pieces: burningship chladni dragon fern harmonograph hilbert julia koch lorenz mandelbrot newton pascal seahorse sunflower timestable ulam zeta', 'CLIENTCRAP' ] ];
     is_deeply $server->{sent}, [], 'nothing was sent';
 };
 
@@ -519,6 +528,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'pascal        Pascal\'s triangle mod 2, which turns out to be Sierpinski\'s',
             'seahorse      a seahorse tail in Seahorse Valley, 600 times closer',
             'sunflower     seeds placed by the golden angle, falling into Fibonacci spirals',
+            'timestable    times tables drawn on a circle, where a cardioid and a nephroid appear',
             'ulam          the Ulam spiral, where the primes line up on diagonals',
             'zeta          the path of zeta(1/2 + it) through its first three zeros',
     ];
@@ -603,7 +613,7 @@ subtest 'things that change while a piece is drawing' => sub {
 subtest 'cmd_math refuses bad input' => sub {
     my $item = FakeItem->new;
     cmd_math('nope', FakeServer->new, $item);
-    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: burningship chladni dragon fern harmonograph hilbert julia koch lorenz mandelbrot newton pascal seahorse sunflower ulam zeta', 'CLIENTERROR' ] ],
+    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: burningship chladni dragon fern harmonograph hilbert julia koch lorenz mandelbrot newton pascal seahorse sunflower timestable ulam zeta', 'CLIENTERROR' ] ],
         'unknown piece';
 
     @printed = ();

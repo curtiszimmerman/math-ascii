@@ -658,6 +658,62 @@ sub dragon_path {
     return @path;
 }
 
+# The times table on a circle: put $n points around a circle and join each
+# point k to point m*k mod $n. Nothing about it mentions curves, yet with
+# m = 2 the chords trace out a cardioid (the same shape as the Mandelbrot
+# set's body) and with m = 3 a nephroid. Points that would join themselves
+# are left out. Returns [k, m*k mod $n] pairs.
+sub times_table_chords {
+    my ($n, $m) = @_;
+    return grep { $_->[0] != $_->[1] } map { [ $_, $m * $_ % $n ] } 0 .. $n - 1;
+}
+
+# Two circles side by side, times 2 and times 3. The curves are envelopes,
+# where the chords crowd together, so each pixel counts how many chords cross
+# it and glows brighter the more there are. Coloring chords one by one just
+# makes confetti. The gradient's stops are palette colors (25, 49, 74, 98) so
+# the blends between them don't land on grays.
+my @TIMESTABLE_GLOW = (
+    [ 0,   46,  0,   71 ],
+    [ 0.4, 117, 0,   181 ],
+    [ 0.7, 255, 102, 255 ],
+    [ 1,   255, 255, 255 ],
+);
+
+sub timestable_canvas {
+    my $n      = 200;
+    my $radius = 17;    # in rows; a circle is twice that many pixels across
+    my $pi     = 4 * atan2(1, 1);
+    my %crossings;
+    for my $circle ([ 2, 35 ], [ 3, 105 ]) {
+        my ($m, $center_col) = @$circle;
+        my $place = sub {
+            my $angle = $pi / 2 - 2 * $pi * $_[0] / $n;
+            return [ 25 - $radius * sin($angle) - 0.5, $center_col + 2 * $radius * cos($angle) - 0.5 ];
+        };
+        for my $chord (times_table_chords($n, $m)) {
+            my %crossed = map { POSIX::floor($_->[0] + 0.5) . ',' . POSIX::floor($_->[1] + 0.5) => 1 }
+                line_points($place->($chord->[0]), $place->($chord->[1]), 0);
+            $crossings{$_}++ for keys %crossed;
+        }
+    }
+    # A straight count, not a log of it, so that only real crowding glows and
+    # the scattered chords elsewhere stay dim. The cusps are far more crowded
+    # than anywhere else, so the scale tops out at the 95th percentile rather
+    # than the very busiest pixel, or the rest of the curve would be dim too.
+    my @counts  = sort { $a <=> $b } values %crossings;
+    my $most    = $counts[ int(0.95 * $#counts) ];
+    my @palette = gradient_palette(\@TIMESTABLE_GLOW);
+    my @pixels  = map {
+        my $r = $_;
+        [ map { my $count = $crossings{"$r,$_"}; $count ? nearest_color_in(\@palette, gradient_rgb(\@TIMESTABLE_GLOW, List::Util::min(1, $count / $most))) : $BLACK } 0 .. 139 ];
+    } 0 .. 47;
+    my $canvas = pixels_to_canvas(\@pixels);
+    put_text($canvas, 0, 9,  "k -> 2k mod $n", 97);
+    put_text($canvas, 0, 44, "k -> 3k mod $n", 97);
+    return $canvas;
+}
+
 # The Koch snowflake: start with a triangle, and on the middle third of every
 # edge raise a smaller triangle, again and again. Every round makes the edge
 # 4/3 as long, so in the limit the outline is infinitely long, though it
@@ -1192,6 +1248,7 @@ our %PIECES = (
     ulam       => { draw => \&ulam_canvas,       about => 'the Ulam spiral, where the primes line up on diagonals' },
     burningship => { draw => \&burningship_canvas, about => 'the Burning Ship fractal, z^2 + c with the orbit folded' },
     dragon     => { draw => \&dragon_canvas,     about => 'the Heighway dragon, a strip of paper folded in half eight times' },
+    timestable => { draw => \&timestable_canvas, about => 'times tables drawn on a circle, where a cardioid and a nephroid appear' },
     koch       => { draw => \&koch_canvas,       about => 'the Koch snowflake, an infinitely long edge around a finite area' },
     chladni    => { draw => \&chladni_canvas,    about => 'sand on a ringing metal plate, gathered on the lines that stand still' },
     harmonograph => { draw => \&harmonograph_canvas, about => 'two damped pendulums drawing on paper, spiraling in as they tire' },
