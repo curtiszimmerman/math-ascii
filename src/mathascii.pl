@@ -504,6 +504,31 @@ sub ulam_canvas {
     return pixels_to_canvas(\@pixels);
 }
 
+# The Burning Ship, here its biggest ship, a little left of the main body.
+# It's drawn with the imaginary axis pointing down, the usual way, because
+# that's what puts the ship upright on the water.
+#
+# Like the Julia set's, the gradient starts on a palette color (16, a deep
+# maroon) because blends up from black land on gray.
+my @BURNING_GLOW = (
+    [ 0,    71,  0,   0 ],
+    [ 0.3,  116, 0,   0 ],
+    [ 0.55, 220, 40,  0 ],
+    [ 0.75, 255, 150, 0 ],
+    [ 0.9,  255, 230, 80 ],
+    [ 1,    255, 255, 220 ],
+);
+
+sub burningship_canvas {
+    my $canvas = escape_view(
+        center_x  => -1.765, center_y => 0.02, half_height => 0.065,
+        glow_from => 8,      glow_to  => 120,   glow        => \@BURNING_GLOW,
+        escape    => sub { escape_time(0, 0, $_[0], -$_[1], 500, 1) },
+    );
+    put_text($canvas, 0, 1, 'z -> (|Re z| + i|Im z|)^2 + c', 97);
+    return $canvas;
+}
+
 # Whether the binomial coefficient C(n, k) is odd. By Lucas's theorem it is
 # exactly when every bit set in k is also set in n.
 sub binomial_is_odd {
@@ -607,9 +632,11 @@ sub lorenz_canvas {
 # radius) so colors blend instead of falling into bands.
 #
 # The Mandelbrot set starts every c from z = 0; a Julia set fixes c and starts
-# from each point.
+# from each point. With $fold set, z is folded into the first quadrant
+# (|Re z| + i|Im z|) before squaring, which makes the Burning Ship. Folding only
+# changes the sign of the 2xy term, so that's all it touches.
 sub escape_time {
-    my ($x, $y, $cx, $cy, $max_steps) = @_;
+    my ($x, $y, $cx, $cy, $max_steps, $fold) = @_;
 
     # Bounded orbits settle into a cycle. We remember z at steps 1, 2, 4,
     # 8, ... and if z ever comes back to the remembered value, it's caught in a
@@ -617,7 +644,8 @@ sub escape_time {
     # $max_steps.
     my ($seen_x, $seen_y, $next_check) = ($x, $y, 1);
     for my $step (1 .. $max_steps) {
-        ($x, $y) = ($x * $x - $y * $y + $cx, 2 * $x * $y + $cy);
+        my $xy = $fold ? abs($x * $y) : $x * $y;
+        ($x, $y) = ($x * $x - $y * $y + $cx, 2 * $xy + $cy);
         my $size = $x * $x + $y * $y;
         return $step + 1 - log(log($size) / 2) / log(2) if $size > 65536;
         return if abs($x - $seen_x) < 1e-13 && abs($y - $seen_y) < 1e-13;
@@ -798,6 +826,7 @@ our %PIECES = (
     lorenz     => { draw => \&lorenz_canvas,     about => 'the Lorenz attractor, the butterfly of chaos' },
     newton     => { draw => \&newton_canvas,     about => 'Newton\'s method on z^3 - 1, three basins with a fractal border' },
     ulam       => { draw => \&ulam_canvas,       about => 'the Ulam spiral, where the primes line up on diagonals' },
+    burningship => { draw => \&burningship_canvas, about => 'the Burning Ship fractal, z^2 + c with the orbit folded' },
     pascal     => { draw => \&pascal_canvas,     about => 'Pascal\'s triangle mod 2, which turns out to be Sierpinski\'s' },
 );
 

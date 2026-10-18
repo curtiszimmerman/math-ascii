@@ -290,6 +290,17 @@ subtest 'primes_up_to' => sub {
     is_deeply [ grep { $is_prime->[$_] } 0 .. 30 ], [ 2, 3, 5, 7, 11, 13, 17, 19, 23, 29 ];
 };
 
+subtest 'escape_time with the burning ship fold' => sub {
+    for my $x (-1.9, -1, 0, 0.2, 0.3, 1) {
+        is_deeply [ escape_time(0, 0, $x, 0, 500, 1) ], [ escape_time(0, 0, $x, 0, 500) ],
+            "on the real axis the fold changes nothing (c = $x)";
+    }
+    # Worked by hand: with the fold, c = i goes (0,1) (-1,1) (0,3) (-9,1)
+    # (80,19) (6039,3041) and is gone, where plain z^2 + c cycles forever.
+    is_deeply [ escape_time(0, 0, 0, 1, 500) ], [], 'c = i cycles without the fold';
+    ok defined escape_time(0, 0, 0, 1, 500, 1), 'and escapes with it';
+};
+
 subtest 'binomial_is_odd' => sub {
     # Build Pascal's triangle the slow way and compare.
     my @row = (1);
@@ -352,7 +363,7 @@ subtest 'cmd_math with no piece lists the pieces' => sub {
     my $server = FakeServer->new;
     my $item   = FakeItem->new;
     cmd_math('', $server, $item);
-    is_deeply $item->{printed}, [ [ 'math: pieces: julia lorenz mandelbrot newton pascal seahorse ulam zeta', 'CLIENTCRAP' ] ];
+    is_deeply $item->{printed}, [ [ 'math: pieces: burningship julia lorenz mandelbrot newton pascal seahorse ulam zeta', 'CLIENTCRAP' ] ];
     is_deeply $server->{sent}, [], 'nothing was sent';
 };
 
@@ -377,14 +388,15 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
     cmd_math(' -l ', $server, $item);
     is_deeply $item->{printed}, [
         map { [ "math: $_", 'CLIENTCRAP' ] }
-            'julia       the Julia set called Douady\'s rabbit, ears within ears',
-            'lorenz      the Lorenz attractor, the butterfly of chaos',
-            'mandelbrot  the whole Mandelbrot set, glowing toward its edge',
-            'newton      Newton\'s method on z^3 - 1, three basins with a fractal border',
-            'pascal      Pascal\'s triangle mod 2, which turns out to be Sierpinski\'s',
-            'seahorse    a seahorse tail in Seahorse Valley, 600 times closer',
-            'ulam        the Ulam spiral, where the primes line up on diagonals',
-            'zeta        the path of zeta(1/2 + it) through its first three zeros',
+            'burningship  the Burning Ship fractal, z^2 + c with the orbit folded',
+            'julia        the Julia set called Douady\'s rabbit, ears within ears',
+            'lorenz       the Lorenz attractor, the butterfly of chaos',
+            'mandelbrot   the whole Mandelbrot set, glowing toward its edge',
+            'newton       Newton\'s method on z^3 - 1, three basins with a fractal border',
+            'pascal       Pascal\'s triangle mod 2, which turns out to be Sierpinski\'s',
+            'seahorse     a seahorse tail in Seahorse Valley, 600 times closer',
+            'ulam         the Ulam spiral, where the primes line up on diagonals',
+            'zeta         the path of zeta(1/2 + it) through its first three zeros',
     ];
     is_deeply $server->{sent}, [], 'nothing was sent';
 };
@@ -467,7 +479,7 @@ subtest 'things that change while a piece is drawing' => sub {
 subtest 'cmd_math refuses bad input' => sub {
     my $item = FakeItem->new;
     cmd_math('nope', FakeServer->new, $item);
-    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: julia lorenz mandelbrot newton pascal seahorse ulam zeta', 'CLIENTERROR' ] ],
+    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: burningship julia lorenz mandelbrot newton pascal seahorse ulam zeta', 'CLIENTERROR' ] ],
         'unknown piece';
 
     @printed = ();
