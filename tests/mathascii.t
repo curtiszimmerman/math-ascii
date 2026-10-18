@@ -316,6 +316,15 @@ subtest 'fern_points' => sub {
     is_deeply [ fern_points(500) ], [ @points[ 0 .. 499 ] ], 'the same every time';
 };
 
+subtest 'harmonograph_points' => sub {
+    my @points = harmonograph_points(20_000);
+    is scalar @points, 20_000, 'one point per step';
+    is_deeply [ grep { abs($_->[0]) > 3 || abs($_->[1]) > 2 } @points ], [],
+        'the pen never goes past the pendulums\' full swing';
+    my $reach = sub { List::Util::max(map { sqrt($_->[0]**2 + $_->[1]**2) } @_) };
+    ok $reach->(@points[ -2000 .. -1 ]) < $reach->(@points[ 0 .. 1999 ]) / 2, 'and the swing dies away as it goes';
+};
+
 subtest 'sunflower_seeds' => sub {
     my $pi = 4 * atan2(1, 1);
     close_to $GOLDEN_ANGLE * 180 / $pi, 137.50776405003785, 'the golden angle';
@@ -439,7 +448,7 @@ subtest 'cmd_math with no piece lists the pieces' => sub {
     my $server = FakeServer->new;
     my $item   = FakeItem->new;
     cmd_math('', $server, $item);
-    is_deeply $item->{printed}, [ [ 'math: pieces: burningship dragon fern hilbert julia lorenz mandelbrot newton pascal seahorse sunflower ulam zeta', 'CLIENTCRAP' ] ];
+    is_deeply $item->{printed}, [ [ 'math: pieces: burningship dragon fern harmonograph hilbert julia lorenz mandelbrot newton pascal seahorse sunflower ulam zeta', 'CLIENTCRAP' ] ];
     is_deeply $server->{sent}, [], 'nothing was sent';
 };
 
@@ -464,19 +473,20 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
     cmd_math(' -l ', $server, $item);
     is_deeply $item->{printed}, [
         map { [ "math: $_", 'CLIENTCRAP' ] }
-            'burningship  the Burning Ship fractal, z^2 + c with the orbit folded',
-            'dragon       the Heighway dragon, a strip of paper folded in half eight times',
-            'fern         Barnsley\'s fern, grown from four random affine maps',
-            'hilbert      the Hilbert curve, one line through all 256 squares of a grid',
-            'julia        the Julia set called Douady\'s rabbit, ears within ears',
-            'lorenz       the Lorenz attractor, the butterfly of chaos',
-            'mandelbrot   the whole Mandelbrot set, glowing toward its edge',
-            'newton       Newton\'s method on z^3 - 1, three basins with a fractal border',
-            'pascal       Pascal\'s triangle mod 2, which turns out to be Sierpinski\'s',
-            'seahorse     a seahorse tail in Seahorse Valley, 600 times closer',
-            'sunflower    seeds placed by the golden angle, falling into Fibonacci spirals',
-            'ulam         the Ulam spiral, where the primes line up on diagonals',
-            'zeta         the path of zeta(1/2 + it) through its first three zeros',
+            'burningship   the Burning Ship fractal, z^2 + c with the orbit folded',
+            'dragon        the Heighway dragon, a strip of paper folded in half eight times',
+            'fern          Barnsley\'s fern, grown from four random affine maps',
+            'harmonograph  two damped pendulums drawing on paper, spiraling in as they tire',
+            'hilbert       the Hilbert curve, one line through all 256 squares of a grid',
+            'julia         the Julia set called Douady\'s rabbit, ears within ears',
+            'lorenz        the Lorenz attractor, the butterfly of chaos',
+            'mandelbrot    the whole Mandelbrot set, glowing toward its edge',
+            'newton        Newton\'s method on z^3 - 1, three basins with a fractal border',
+            'pascal        Pascal\'s triangle mod 2, which turns out to be Sierpinski\'s',
+            'seahorse      a seahorse tail in Seahorse Valley, 600 times closer',
+            'sunflower     seeds placed by the golden angle, falling into Fibonacci spirals',
+            'ulam          the Ulam spiral, where the primes line up on diagonals',
+            'zeta          the path of zeta(1/2 + it) through its first three zeros',
     ];
     is_deeply $server->{sent}, [], 'nothing was sent';
 };
@@ -559,7 +569,7 @@ subtest 'things that change while a piece is drawing' => sub {
 subtest 'cmd_math refuses bad input' => sub {
     my $item = FakeItem->new;
     cmd_math('nope', FakeServer->new, $item);
-    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: burningship dragon fern hilbert julia lorenz mandelbrot newton pascal seahorse sunflower ulam zeta', 'CLIENTERROR' ] ],
+    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: burningship dragon fern harmonograph hilbert julia lorenz mandelbrot newton pascal seahorse sunflower ulam zeta', 'CLIENTERROR' ] ],
         'unknown piece';
 
     @printed = ();

@@ -630,6 +630,42 @@ sub dragon_path {
     return @path;
 }
 
+# A harmonograph: one pendulum swings a pen across and another swings the
+# paper up and down, each slowly losing energy, so each direction is a damped
+# sine wave. Real ones often hang a second pendulum on an axis, so each
+# direction is a list of waves to add up. The frequencies are close to 3:2
+# but a little off, so the figure slowly turns as it spirals in. Each wave is
+# [amplitude, frequency, phase, damping].
+my @HARMONOGRAPH_ACROSS = ([ 3, 3.006, 1.5708, 0.03 ]);
+my @HARMONOGRAPH_DOWN   = ([ 2, 2,     0,      0.03 ]);
+
+sub harmonograph_points {
+    my ($count) = @_;
+    my $dt = 0.006;
+    my $swing = sub {
+        my ($waves, $t) = @_;
+        return List::Util::sum(map { my ($a, $f, $p, $d) = @$_; $a * sin($f * $t + $p) * exp(-$d * $t) } @$waves);
+    };
+    return map { my $t = $_ * $dt; [ $swing->(\@HARMONOGRAPH_ACROSS, $t), $swing->(\@HARMONOGRAPH_DOWN, $t) ] } 0 .. $count - 1;
+}
+
+# Drawn as a thin glowing line whose hue runs with time, from the wide early
+# swings at the outside to the small late ones in the middle.
+sub harmonograph_canvas {
+    my ($pixel_cols, $pixel_rows) = (140, 48);
+    my $scale = 22;    # pixels per unit across; rows are half that
+    # Running longer piles the small late loops up into a blur in the middle.
+    my @path  = harmonograph_points(5_000);
+    my @points = map {
+        my ($x, $y) = @{ $path[$_] };
+        [ $pixel_rows / 2 - $y * $scale / 2 - 0.5, $pixel_cols / 2 + $x * $scale - 0.5, $_ / $#path ];
+    } 0 .. $#path;
+    my @rgb = map { [ map { [ 0, 0, 0 ] } 1 .. $pixel_cols ] } 1 .. $pixel_rows;
+    draw_glow_curve(\@rgb, \@points, \@ZETA_HUES, 0.5);
+    my @palette = (gradient_palette(\@ZETA_HUES), $BLACK);
+    return pixels_to_canvas([ map { [ map { nearest_color_in(\@palette, @$_) } @$_ ] } @rgb ]);
+}
+
 # Vogel's model of a sunflower head: seed n sits at n golden angles around
 # and sqrt(n) out, so every seed gets the same area. The golden angle is the
 # full turn cut in the golden ratio, about 137.5 degrees. Because it's as far
@@ -1056,6 +1092,7 @@ our %PIECES = (
     ulam       => { draw => \&ulam_canvas,       about => 'the Ulam spiral, where the primes line up on diagonals' },
     burningship => { draw => \&burningship_canvas, about => 'the Burning Ship fractal, z^2 + c with the orbit folded' },
     dragon     => { draw => \&dragon_canvas,     about => 'the Heighway dragon, a strip of paper folded in half eight times' },
+    harmonograph => { draw => \&harmonograph_canvas, about => 'two damped pendulums drawing on paper, spiraling in as they tire' },
     sunflower  => { draw => \&sunflower_canvas,  about => 'seeds placed by the golden angle, falling into Fibonacci spirals' },
     hilbert    => { draw => \&hilbert_canvas,    about => 'the Hilbert curve, one line through all 256 squares of a grid' },
     fern       => { draw => \&fern_canvas,       about => 'Barnsley\'s fern, grown from four random affine maps' },
