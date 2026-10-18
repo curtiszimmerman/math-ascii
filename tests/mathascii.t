@@ -316,6 +316,24 @@ subtest 'fern_points' => sub {
     is_deeply [ fern_points(500) ], [ @points[ 0 .. 499 ] ], 'the same every time';
 };
 
+subtest 'collatz_sequence' => sub {
+    is_deeply [ collatz_sequence(6) ], [ 6, 3, 10, 5, 16, 8, 4, 2, 1 ];
+    is_deeply [ collatz_sequence(1) ], [1], '1 is already home';
+    my @long = collatz_sequence(27);
+    is scalar @long, 112, '27 takes 111 steps';
+    is List::Util::max(@long), 9232, 'and climbs as high as 9232 on the way';
+};
+
+subtest 'fit_to_frame' => sub {
+    my $place = fit_to_frame([ [ 0, 0 ], [ 10, 0 ], [ 10, 5 ] ]);
+    my ($left, $right, $top) = map { $place->(@$_) } [ 0, 0 ], [ 10, 0 ], [ 10, 5 ];
+    ok abs(($left->[1] + $right->[1]) / 2 - 69.5) < 1e-9, 'centered across';
+    ok abs(($left->[0] + $top->[0]) / 2 - 23.5) < 1e-9, 'centered down';
+    ok abs(($right->[1] - $left->[1]) - 2 * 2 * ($right->[0] - $top->[0])) < 1e-9,
+        'a unit is twice as many pixels across as rows down, so shapes keep their proportions';
+    ok $left->[1] >= 0 && $right->[1] <= 139 && $top->[0] >= 0 && $left->[0] <= 47, 'and it all fits';
+};
+
 subtest 'times_table_chords' => sub {
     is_deeply [ times_table_chords(10, 2) ], [ map { [ $_, 2 * $_ % 10 ] } 1 .. 9 ], 'k joins 2k mod 10, skipping 0 which joins itself';
     for ([ 200, 2, 1 ], [ 200, 3, 2 ], [ 200, 21, 20 ]) {
@@ -489,7 +507,7 @@ subtest 'cmd_math with no piece lists the pieces' => sub {
     my $server = FakeServer->new;
     my $item   = FakeItem->new;
     cmd_math('', $server, $item);
-    is_deeply $item->{printed}, [ [ 'math: pieces: burningship chladni dragon fern harmonograph hilbert julia koch lorenz mandelbrot newton pascal seahorse sunflower timestable ulam zeta', 'CLIENTCRAP' ] ];
+    is_deeply $item->{printed}, [ [ 'math: pieces: burningship chladni collatz dragon fern harmonograph hilbert julia koch lorenz mandelbrot newton pascal seahorse sunflower timestable ulam zeta', 'CLIENTCRAP' ] ];
     is_deeply $server->{sent}, [], 'nothing was sent';
 };
 
@@ -516,6 +534,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
         map { [ "math: $_", 'CLIENTCRAP' ] }
             'burningship   the Burning Ship fractal, z^2 + c with the orbit folded',
             'chladni       sand on a ringing metal plate, gathered on the lines that stand still',
+            'collatz       the Collatz coral: every trip down to 1, bending left on even, right on odd',
             'dragon        the Heighway dragon, a strip of paper folded in half eight times',
             'fern          Barnsley\'s fern, grown from four random affine maps',
             'harmonograph  two damped pendulums drawing on paper, spiraling in as they tire',
@@ -613,7 +632,7 @@ subtest 'things that change while a piece is drawing' => sub {
 subtest 'cmd_math refuses bad input' => sub {
     my $item = FakeItem->new;
     cmd_math('nope', FakeServer->new, $item);
-    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: burningship chladni dragon fern harmonograph hilbert julia koch lorenz mandelbrot newton pascal seahorse sunflower timestable ulam zeta', 'CLIENTERROR' ] ],
+    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: burningship chladni collatz dragon fern harmonograph hilbert julia koch lorenz mandelbrot newton pascal seahorse sunflower timestable ulam zeta', 'CLIENTERROR' ] ],
         'unknown piece';
 
     @printed = ();

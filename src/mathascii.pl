@@ -658,6 +658,65 @@ sub dragon_path {
     return @path;
 }
 
+# Scales a drawing to fill the frame, keeping its proportions, and returns a
+# function that takes a point (x, y) of the drawing, with y up, to fractional
+# [row, col] pixels. A unit is twice as many pixels across as rows down
+# because pixels are twice as tall as wide.
+sub fit_to_frame {
+    my ($points) = @_;
+    my @xs = map { $_->[0] } @$points;
+    my @ys = map { $_->[1] } @$points;
+    my ($min_x, $max_x, $min_y, $max_y) = (List::Util::min(@xs), List::Util::max(@xs), List::Util::min(@ys), List::Util::max(@ys));
+    my $scale = List::Util::min(136 / (($max_x - $min_x) || 1), 2 * 44 / (($max_y - $min_y) || 1));
+    my ($mid_x, $mid_y) = (($min_x + $max_x) / 2, ($min_y + $max_y) / 2);
+    return sub {
+        my ($x, $y) = @_;
+        return [ 23.5 - ($y - $mid_y) * $scale / 2, 69.5 + ($x - $mid_x) * $scale ];
+    };
+}
+
+# The Collatz rule: halve even numbers, and take odd ones to 3n + 1. Every
+# number anyone has tried ends up at 1, but nobody has proved they all do.
+# Returns the whole trip from $n down to 1.
+sub collatz_sequence {
+    my ($n) = @_;
+    my @trip = ($n);
+    while ($n != 1) {
+        $n = $n % 2 ? 3 * $n + 1 : $n / 2;
+        push @trip, $n;
+    }
+    return @trip;
+}
+
+# The Collatz coral: every number's trip, read backwards from 1, drawn as a
+# stem that bends one way at every even number and the other way at every odd
+# one. Numbers whose trips end the same way share a trunk, so the whole lot
+# grows like coral. The hue goes with how far up the stem a point is.
+sub collatz_canvas {
+    my ($even_turn, $odd_turn) = (0.15, -0.27);
+    my (@stems, $tallest);
+    # A few hundred numbers mostly share one long trunk; it takes more than a
+    # thousand before the branches fan out.
+    for my $n (2 .. 1500) {
+        my ($x, $y, $heading) = (0, 0, 2 * atan2(1, 1));
+        my @stem = ([ 0, 0 ]);
+        for my $value (reverse collatz_sequence($n)) {
+            next if $value == 1;
+            $heading += $value % 2 ? $odd_turn : $even_turn;
+            ($x, $y) = ($x + cos $heading, $y + sin $heading);
+            push @stem, [ $x, $y ];
+        }
+        push @stems, \@stem;
+        $tallest = List::Util::max($tallest // 0, $#stem);
+    }
+    my $place = fit_to_frame([ map {@$_} @stems ]);
+    my @points;
+    for my $stem (@stems) {
+        push @points, map { line_points($place->(@{ $stem->[ $_ - 1 ] }), $place->(@{ $stem->[$_] }), $_ / $tallest) } 1 .. $#$stem;
+    }
+    return glow_lines_canvas(\@points, \@ZETA_HUES, 0.4);
+}
+
 # The times table on a circle: put $n points around a circle and join each
 # point k to point m*k mod $n. Nothing about it mentions curves, yet with
 # m = 2 the chords trace out a cardioid (the same shape as the Mandelbrot
@@ -1248,6 +1307,7 @@ our %PIECES = (
     ulam       => { draw => \&ulam_canvas,       about => 'the Ulam spiral, where the primes line up on diagonals' },
     burningship => { draw => \&burningship_canvas, about => 'the Burning Ship fractal, z^2 + c with the orbit folded' },
     dragon     => { draw => \&dragon_canvas,     about => 'the Heighway dragon, a strip of paper folded in half eight times' },
+    collatz    => { draw => \&collatz_canvas,    about => 'the Collatz coral: every trip down to 1, bending left on even, right on odd' },
     timestable => { draw => \&timestable_canvas, about => 'times tables drawn on a circle, where a cardioid and a nephroid appear' },
     koch       => { draw => \&koch_canvas,       about => 'the Koch snowflake, an infinitely long edge around a finite area' },
     chladni    => { draw => \&chladni_canvas,    about => 'sand on a ringing metal plate, gathered on the lines that stand still' },
