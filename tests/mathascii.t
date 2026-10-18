@@ -316,6 +316,20 @@ subtest 'fern_points' => sub {
     is_deeply [ fern_points(500) ], [ @points[ 0 .. 499 ] ], 'the same every time';
 };
 
+subtest 'hilbert_path' => sub {
+    for my $order (1, 3, 4) {
+        my $side = 2**$order;
+        my @path = hilbert_path($order);
+        is scalar @path, $side * $side, "order $order has a point for every cell";
+        is_deeply [ @path[ 0, -1 ] ], [ [ 0, 0 ], [ $side - 1, 0 ] ], "order $order runs corner to neighboring corner";
+        is_deeply [ grep { abs($path[$_][0] - $path[ $_ - 1 ][0]) + abs($path[$_][1] - $path[ $_ - 1 ][1]) != 1 } 1 .. $#path ], [],
+            "order $order always steps to a neighboring cell";
+        my %seen;
+        is_deeply [ grep { $seen{"@$_"}++ || $_->[0] < 0 || $_->[1] < 0 || $_->[0] >= $side || $_->[1] >= $side } @path ], [],
+            "order $order visits every cell once, inside the grid";
+    }
+};
+
 subtest 'rotate_quarter_turns' => sub {
     is_deeply rotate_quarter_turns([ 2, 1 ], 1),  [ -1, 2 ],  'a quarter turn counterclockwise';
     is_deeply rotate_quarter_turns([ 2, 1 ], 2),  [ -2, -1 ], 'a half turn';
@@ -401,7 +415,7 @@ subtest 'cmd_math with no piece lists the pieces' => sub {
     my $server = FakeServer->new;
     my $item   = FakeItem->new;
     cmd_math('', $server, $item);
-    is_deeply $item->{printed}, [ [ 'math: pieces: burningship dragon fern julia lorenz mandelbrot newton pascal seahorse ulam zeta', 'CLIENTCRAP' ] ];
+    is_deeply $item->{printed}, [ [ 'math: pieces: burningship dragon fern hilbert julia lorenz mandelbrot newton pascal seahorse ulam zeta', 'CLIENTCRAP' ] ];
     is_deeply $server->{sent}, [], 'nothing was sent';
 };
 
@@ -429,6 +443,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'burningship  the Burning Ship fractal, z^2 + c with the orbit folded',
             'dragon       the Heighway dragon, a strip of paper folded in half eight times',
             'fern         Barnsley\'s fern, grown from four random affine maps',
+            'hilbert      the Hilbert curve, one line through all 256 squares of a grid',
             'julia        the Julia set called Douady\'s rabbit, ears within ears',
             'lorenz       the Lorenz attractor, the butterfly of chaos',
             'mandelbrot   the whole Mandelbrot set, glowing toward its edge',
@@ -519,7 +534,7 @@ subtest 'things that change while a piece is drawing' => sub {
 subtest 'cmd_math refuses bad input' => sub {
     my $item = FakeItem->new;
     cmd_math('nope', FakeServer->new, $item);
-    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: burningship dragon fern julia lorenz mandelbrot newton pascal seahorse ulam zeta', 'CLIENTERROR' ] ],
+    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: burningship dragon fern hilbert julia lorenz mandelbrot newton pascal seahorse ulam zeta', 'CLIENTERROR' ] ],
         'unknown piece';
 
     @printed = ();

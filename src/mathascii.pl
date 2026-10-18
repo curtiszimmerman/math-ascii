@@ -630,6 +630,35 @@ sub dragon_path {
     return @path;
 }
 
+# The Hilbert curve of the given order: one unbroken path through every cell
+# of a 2^order square grid, never crossing itself, from the bottom left corner
+# to the bottom right. Each cell's place along the path is turned into (x, y)
+# two bits at a time: the bits pick a quadrant, and the smaller curve inside
+# that quadrant is flipped or turned so the four pieces join end to end.
+sub hilbert_path {
+    my ($order) = @_;
+    my $side = 2**$order;
+    my @path;
+    for my $index (0 .. $side * $side - 1) {
+        my ($x, $y, $rest) = (0, 0, $index);
+        for (my $size = 1; $size < $side; $size *= 2) {
+            my $right = 1 & int($rest / 2);
+            my $up    = 1 & ($rest ^ $right);
+            if (!$up) {
+                ($x, $y) = ($size - 1 - $x, $size - 1 - $y) if $right;
+                ($x, $y) = ($y, $x);
+            }
+            $x += $size * $right;
+            $y += $size * $up;
+            $rest = int($rest / 4);
+        }
+        push @path, [ $x, $y ];
+    }
+    return @path;
+}
+
+sub hilbert_canvas { return grid_path_canvas([ hilbert_path(4) ], 6) }
+
 # Turns a point [x, y] counterclockwise about the origin by whole quarter
 # turns (negative for clockwise).
 sub rotate_quarter_turns {
@@ -645,18 +674,24 @@ sub rotate_quarter_turns {
 my $DRAGON_FOLDS = 8;
 
 sub dragon_canvas {
+    return grid_path_canvas([ map { rotate_quarter_turns($_, -$DRAGON_FOLDS / 2) } dragon_path($DRAGON_FOLDS) ], 6);
+}
+
+# Draws a path of [x, y] points on a whole-number grid as a thin glowing line,
+# centered, with its hue running from one end to the other. A grid unit is
+# $scale pixels across and half as many rows down, which is square since
+# pixels are twice as tall as wide. $scale should be even: keeping it and the
+# margins whole numbers puts every corner of the path on a pixel center.
+# Otherwise a thin horizontal line can fall between two rows and vanish from
+# both.
+sub grid_path_canvas {
+    my ($path, $scale) = @_;
+    my @path = @$path;
     my ($pixel_cols, $pixel_rows) = (140, 48);
-    my @path = map { rotate_quarter_turns($_, -$DRAGON_FOLDS / 2) } dragon_path($DRAGON_FOLDS);
     my @xs = map { $_->[0] } @path;
     my @ys = map { $_->[1] } @path;
     my ($min_x, $max_x) = (List::Util::min(@xs), List::Util::max(@xs));
     my ($min_y, $max_y) = (List::Util::min(@ys), List::Util::max(@ys));
-
-    # A grid unit is 6 pixels across and 3 rows down, which is square since
-    # pixels are twice as tall as wide. Keeping that and the margins whole
-    # numbers puts every corner of the dragon on a pixel center. Otherwise a
-    # thin horizontal line can fall between two rows and vanish from both.
-    my $scale = 6;
     my $left  = int(($pixel_cols - $scale * ($max_x - $min_x)) / 2);
     my $top   = int(($pixel_rows - $scale / 2 * ($max_y - $min_y)) / 2);
 
@@ -975,6 +1010,7 @@ our %PIECES = (
     ulam       => { draw => \&ulam_canvas,       about => 'the Ulam spiral, where the primes line up on diagonals' },
     burningship => { draw => \&burningship_canvas, about => 'the Burning Ship fractal, z^2 + c with the orbit folded' },
     dragon     => { draw => \&dragon_canvas,     about => 'the Heighway dragon, a strip of paper folded in half eight times' },
+    hilbert    => { draw => \&hilbert_canvas,    about => 'the Hilbert curve, one line through all 256 squares of a grid' },
     fern       => { draw => \&fern_canvas,       about => 'Barnsley\'s fern, grown from four random affine maps' },
     pascal     => { draw => \&pascal_canvas,     about => 'Pascal\'s triangle mod 2, which turns out to be Sierpinski\'s' },
 );
