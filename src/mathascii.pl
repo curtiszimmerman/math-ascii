@@ -3,6 +3,7 @@ use warnings;
 
 use Irssi;
 use List::Util ();
+use POSIX ();
 
 our $VERSION = '1.00';
 our %IRSSI = (
@@ -63,6 +64,38 @@ sub color_distance {
     my @a = rgb($_[0]);
     my @b = rgb($_[1]);
     return ($a[0] - $b[0])**2 + ($a[1] - $b[1])**2 + ($a[2] - $b[2])**2;
+}
+
+# The palette color closest to an RGB color.
+my %nearest_cache;
+
+sub nearest_color {
+    my @want = map { int($_ + 0.5) } @_;
+    my $key  = join ',', @want;
+    return $nearest_cache{$key} if exists $nearest_cache{$key};
+
+    my ($best, $best_distance);
+    for my $code (sort { $a <=> $b } keys %RGB) {
+        my @have = rgb($code);
+        my $distance = ($have[0] - $want[0])**2 + ($have[1] - $want[1])**2 + ($have[2] - $want[2])**2;
+        ($best, $best_distance) = ($code, $distance) if !defined $best || $distance < $best_distance;
+    }
+    return $nearest_cache{$key} = $best;
+}
+
+# The RGB color at a position along a gradient. Stops are
+# [position, r, g, b] in increasing position, and positions outside them get
+# the end colors.
+sub gradient_rgb {
+    my ($stops, $position) = @_;
+    return @{ $stops->[0] }[ 1 .. 3 ] if $position <= $stops->[0][0];
+    for my $i (1 .. $#$stops) {
+        my ($from, $to) = @$stops[ $i - 1, $i ];
+        next if $position > $to->[0];
+        my $f = ($position - $from->[0]) / ($to->[0] - $from->[0]);
+        return map { $from->[$_] + $f * ($to->[$_] - $from->[$_]) } 1 .. 3;
+    }
+    return @{ $stops->[-1] }[ 1 .. 3 ];
 }
 
 # The quadrant block characters, indexed by which quarters are drawn in the
@@ -160,19 +193,6 @@ sub irc_lines {
     return @lines;
 }
 
-# Picks the line character that best matches a direction of travel. dy is
-# measured upward, in the same units as dx.
-sub direction_char {
-    my ($dx, $dy) = @_;
-    my $pi    = 4 * atan2(1, 1);
-    my $angle = atan2($dy, $dx) * 180 / $pi;
-    $angle += 180 if $angle < 0;
-    return '-'  if $angle < 22.5 || $angle >= 157.5;
-    return '/'  if $angle < 67.5;
-    return '|'  if $angle < 112.5;
-    return '\\';
-}
-
 # The Riemann zeta function, by Euler-Maclaurin summation. We add up the first
 # N-1 terms of the series directly and estimate the rest of it with an integral
 # plus Bernoulli number corrections. With N = 20 and six corrections it is good
@@ -231,75 +251,101 @@ sub zeta {
     return @sum;
 }
 
-# The zeta piece traces zeta(1/2 + it) in the complex plane as t runs from 0
-# to $ZETA_T_MAX. The curve passes through the origin at every zero on the
-# critical line. Color shows how far along t is.
-our $ZETA_T_MAX   = 26;
-our @ZETA_GRADIENT = (60, 59, 58, 57, 56, 55, 54, 53, 52, 63, 62);
+# A pixel's color near a glowing line: the full hue within $GLOW_CORE of the
+# line, then fading into the background color until $GLOW_REACH. Distances are
+# in pixel widths.
+my $GLOW_CORE  = 1;
+my $GLOW_REACH = 4;
 
-my $WIDTH        = 70;
-my $PLOT_TOP     = 1;    # the title takes row 0
-my $PLOT_HEIGHT  = 19;
-my ($X_MIN, $X_MAX, $Y_MIN, $Y_MAX) = (-1.7, 2.6, -1.35, 1.4);
-my $SAMPLES      = 4000;
-
-# Character cells are about twice as tall as they are wide.
-my $CELL_ASPECT = 2;
-
-# Where a point of the complex plane falls on the plot, as fractional
-# (row, col) on the canvas.
-sub plot_position {
-    my ($x, $y) = @_;
-    return (
-        $PLOT_TOP + ($Y_MAX - $y) / ($Y_MAX - $Y_MIN) * ($PLOT_HEIGHT - 1),
-        ($x - $X_MIN) / ($X_MAX - $X_MIN) * ($WIDTH - 1),
-    );
+sub glow_rgb {
+    my ($base, $hue, $distance) = @_;
+    return @$base if $distance >= $GLOW_REACH;
+    my $strength = $distance <= $GLOW_CORE ? 1 : exp(-0.8 * ($distance - $GLOW_CORE));
+    return map { $base->[$_] + $strength * ($hue->[$_] - $base->[$_]) } 0 .. 2;
 }
 
-sub plot_cell {
-    my ($row, $col) = plot_position(@_);
-    return (int($row + 0.5), int($col + 0.5));
+# The zeta piece traces zeta(1/2 + it) in the complex plane as t runs from 0
+# to $ZETA_T_MAX, as a glowing line whose hue runs from violet to pink with t.
+# The curve passes through the origin at every zero on the critical line.
+our $ZETA_T_MAX = 26;
+our @ZETA_HUES  = (
+    [ 0,    140, 70,  255 ],
+    [ 0.2,  0,   140, 255 ],
+    [ 0.4,  0,   255, 210 ],
+    [ 0.55, 140, 255, 0 ],
+    [ 0.7,  255, 230, 0 ],
+    [ 0.85, 255, 120, 0 ],
+    [ 1,    255, 0,   150 ],
+);
+my @ZETA_BACKGROUND = (0,  0,  14);
+my @ZETA_AXIS       = (54, 54, 54);
+my $ZETA_SAMPLES    = 6000;
+
+my $ZETA_COLS       = 70;
+my $ZETA_PIXEL_ROWS = 46;
+my $ZETA_X_MIN      = -1.7;
+
+# How wide a pixel is in the complex plane. Pixels are twice as tall as they
+# are wide. The top edge is set so that y = 0 runs through the middle of a
+# pixel row, which keeps the zeros from wobbling between two rows.
+my $ZETA_STEP  = 4.3 / (2 * $ZETA_COLS);
+my $ZETA_Y_MAX = ($ZETA_PIXEL_ROWS + 1) * $ZETA_STEP;
+
+# Where a point of the complex plane falls, as fractional (row, col) pixels.
+sub zeta_pixel_position {
+    my ($x, $y) = @_;
+    return (($ZETA_Y_MAX - $y) / (2 * $ZETA_STEP) - 0.5, ($x - $ZETA_X_MIN) / $ZETA_STEP - 0.5);
+}
+
+sub zeta_pixel {
+    my ($row, $col) = zeta_pixel_position(@_);
+    return (POSIX::floor($row + 0.5), POSIX::floor($col + 0.5));
+}
+
+sub zeta_pixels {
+    my ($origin_row, $origin_col) = zeta_pixel(0, 0);
+    my $pixel_cols = 2 * $ZETA_COLS;
+    my @rgb = map {
+        my $r = $_;
+        [ map { [ $r == $origin_row || $_ == $origin_col ? @ZETA_AXIS : @ZETA_BACKGROUND ] } 0 .. $pixel_cols - 1 ];
+    } 0 .. $ZETA_PIXEL_ROWS - 1;
+
+    # For every pixel near the curve, find how close the curve comes and at
+    # which t. Where the curve crosses itself, the nearer strand wins.
+    my (%distance, %t_at);
+    for my $i (0 .. $ZETA_SAMPLES) {
+        my $t = $ZETA_T_MAX * $i / $ZETA_SAMPLES;
+        my ($row, $col) = zeta_pixel_position(zeta(0.5, $t));
+        for my $r (POSIX::ceil($row - $GLOW_REACH / 2) .. POSIX::floor($row + $GLOW_REACH / 2)) {
+            next if $r < 0 || $r >= $ZETA_PIXEL_ROWS;
+            for my $c (POSIX::ceil($col - $GLOW_REACH) .. POSIX::floor($col + $GLOW_REACH)) {
+                next if $c < 0 || $c >= $pixel_cols;
+                my $d = sqrt(($c - $col)**2 + (2 * ($r - $row))**2);
+                next if exists $distance{"$r,$c"} && $distance{"$r,$c"} <= $d;
+                $distance{"$r,$c"} = $d;
+                $t_at{"$r,$c"}     = $t;
+            }
+        }
+    }
+    for my $key (keys %distance) {
+        my ($r, $c) = split /,/, $key;
+        my @hue = gradient_rgb(\@ZETA_HUES, $t_at{$key} / $ZETA_T_MAX);
+        $rgb[$r][$c] = [ glow_rgb($rgb[$r][$c], \@hue, $distance{$key}) ];
+    }
+
+    my @pixels = map { [ map { nearest_color(@$_) } @$_ ] } @rgb;
+    # Three pixels across makes a dot about as wide as it is tall.
+    $pixels[$origin_row][ $origin_col + $_ ] = 98 for -1 .. 1;
+    return \@pixels;
 }
 
 sub zeta_canvas {
-    my $canvas = blank_canvas($WIDTH, $PLOT_TOP + $PLOT_HEIGHT + 2);
-    put_text($canvas, 0, 2, 'zeta(s) = 1 + 1/2^s + 1/3^s + ...  =  PROD over primes 1/(1 - p^-s)', 97);
-
-    my ($origin_row, $origin_col) = plot_cell(0, 0);
-    put_text($canvas, $origin_row, 0, '.' x $WIDTH, 92);
-    put_text($canvas, $_, $origin_col, ':', 92) for $PLOT_TOP .. $PLOT_TOP + $PLOT_HEIGHT - 1;
-
-    my @points = map {
-        my $t = $ZETA_T_MAX * $_ / $SAMPLES;
-        [ $t, plot_position(zeta(0.5, $t)) ];
-    } 0 .. $SAMPLES;
-
-    # Each cell takes its character and color from the sample that passes
-    # closest to its center, which keeps the line one character thick.
-    my %closest;
-    for my $i (0 .. $#points) {
-        my ($t, $row, $col) = @{ $points[$i] };
-        my ($r, $c) = (int($row + 0.5), int($col + 0.5));
-        next if $r < $PLOT_TOP || $r >= $PLOT_TOP + $PLOT_HEIGHT || $c < 0 || $c >= $WIDTH;
-        my $distance = sqrt(($col - $c)**2 + (($row - $r) * $CELL_ASPECT)**2);
-        my $best = $closest{"$r,$c"};
-        $closest{"$r,$c"} = [ $distance, $i ] if !$best || $distance < $best->[0];
-    }
-    for my $key (keys %closest) {
-        my ($r, $c) = split /,/, $key;
-        my $i      = $closest{$key}[1];
-        my $before = $points[ $i == 0 ? 0 : $i - 1 ];
-        my $after  = $points[ $i == $#points ? $i : $i + 1 ];
-        my $char   = direction_char($after->[2] - $before->[2], ($before->[1] - $after->[1]) * $CELL_ASPECT);
-        my $color  = $ZETA_GRADIENT[ int($points[$i][0] / $ZETA_T_MAX * $#ZETA_GRADIENT + 0.5) ];
-        put_text($canvas, $r, $c, $char, $color);
-    }
-    put_text($canvas, $origin_row, $origin_col, '@', 98);
-
-    my $footer = $PLOT_TOP + $PLOT_HEIGHT;
-    put_text($canvas, $footer, 2, "the path of zeta(1/2 + it) for 0 < t < $ZETA_T_MAX. it hits @ at t = 14.13,", 95);
-    put_text($canvas, $footer + 1, 2, '21.02, 25.01 ... do all the nontrivial zeros live on this line?', 95);
-    return $canvas;
+    my $title = blank_canvas($ZETA_COLS, 1);
+    put_text($title, 0, 2, 'zeta(s) = 1 + 1/2^s + 1/3^s + ...  =  PROD over primes 1/(1 - p^-s)', 97);
+    my $footer = blank_canvas($ZETA_COLS, 2);
+    put_text($footer, 0, 2, "the path of zeta(1/2 + it) as t runs from 0 (violet) to $ZETA_T_MAX (pink).", 95);
+    put_text($footer, 1, 2, 'it hits the white dot at t = 14.13, 21.02, 25.01: all zeros on 1/2?', 95);
+    return [ @$title, @{ pixels_to_canvas(zeta_pixels()) }, @$footer ];
 }
 
 # How long z -> z^2 + c, starting from z = 0, takes to run away, or undef if it
@@ -322,38 +368,6 @@ sub mandelbrot_escape {
         return $step + 1 - log(log($size) / 2) / log(2) if $size > 65536;
     }
     return undef;
-}
-
-# The palette color closest to an RGB color.
-my %nearest_cache;
-
-sub nearest_color {
-    my @want = map { int($_ + 0.5) } @_;
-    my $key  = join ',', @want;
-    return $nearest_cache{$key} if exists $nearest_cache{$key};
-
-    my ($best, $best_distance);
-    for my $code (sort { $a <=> $b } keys %RGB) {
-        my @have = rgb($code);
-        my $distance = ($have[0] - $want[0])**2 + ($have[1] - $want[1])**2 + ($have[2] - $want[2])**2;
-        ($best, $best_distance) = ($code, $distance) if !defined $best || $distance < $best_distance;
-    }
-    return $nearest_cache{$key} = $best;
-}
-
-# The RGB color at a position along a gradient. Stops are
-# [position, r, g, b] in increasing position, and positions outside them get
-# the end colors.
-sub gradient_rgb {
-    my ($stops, $position) = @_;
-    return @{ $stops->[0] }[ 1 .. 3 ] if $position <= $stops->[0][0];
-    for my $i (1 .. $#$stops) {
-        my ($from, $to) = @$stops[ $i - 1, $i ];
-        next if $position > $to->[0];
-        my $f = ($position - $from->[0]) / ($to->[0] - $from->[0]);
-        return map { $from->[$_] + $f * ($to->[$_] - $from->[$_]) } 1 .. 3;
-    }
-    return @{ $stops->[-1] }[ 1 .. 3 ];
 }
 
 # Far from the set it's nearly black, then it brightens through navy, blue and

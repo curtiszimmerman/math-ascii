@@ -38,7 +38,7 @@ package FakeItem {
 
 package main;
 
-our ($ZETA_T_MAX, @ZETA_GRADIENT, %PIECES, @QUADRANT);
+our ($ZETA_T_MAX, @ZETA_HUES, %PIECES, @QUADRANT);
 my $script = "$FindBin::Bin/../src/mathascii.pl";
 do $script or die "could not load $script: " . ($@ || $!);
 
@@ -113,14 +113,14 @@ subtest 'zeta matches reference values' => sub {
     }
 };
 
-subtest 'direction_char' => sub {
-    is direction_char(1, 0),   '-',  'flat';
-    is direction_char(-1, 0),  '-',  'flat, moving left';
-    is direction_char(0, 1),   '|',  'vertical';
-    is direction_char(1, 1),   '/',  'rising';
-    is direction_char(-1, -1), '/',  'rising, travelled backwards';
-    is direction_char(1, -1),  '\\', 'falling';
-    is direction_char(1, 0.3), '-',  'shallow rise rounds to flat';
+subtest 'glow_rgb' => sub {
+    my @base = (0, 0, 20);
+    my @hue  = (200, 100, 0);
+    is_deeply [ glow_rgb(\@base, \@hue, 0) ], \@hue, 'on the line is the full hue';
+    is_deeply [ glow_rgb(\@base, \@hue, 50) ], \@base, 'far from the line is the background';
+    my @near = glow_rgb(\@base, \@hue, 1.5);
+    my @far  = glow_rgb(\@base, \@hue, 2.5);
+    ok $near[0] > $far[0] && $far[0] > 0, 'the glow fades with distance';
 };
 
 subtest 'irc_lines' => sub {
@@ -209,19 +209,23 @@ subtest 'pieces' => sub {
 };
 
 subtest 'zeta piece' => sub {
-    is_deeply [ grep { /[^\x03\x20-\x7e]/ } irc_lines(zeta_canvas()) ], [],
-        'pure ASCII apart from color codes';
-
-    my @origin = plot_cell(0, 0);
+    my @origin = zeta_pixel(0, 0);
     for my $t (14.134725141734695, 21.022039638771556, 25.01085758014569) {
-        is_deeply [ plot_cell(zeta(0.5, $t)) ], \@origin, "the zero at t = $t lands on the origin";
+        is_deeply [ zeta_pixel(zeta(0.5, $t)) ], \@origin, "the zero at t = $t lands on the origin pixel";
     }
 
-    my $canvas = zeta_canvas();
-    my ($row, $col) = plot_cell(zeta(0.5, 0));
-    is $canvas->[$row][$col][1], $ZETA_GRADIENT[0], 'the curve starts in the first gradient color';
-    ($row, $col) = plot_cell(zeta(0.5, $ZETA_T_MAX));
-    is $canvas->[$row][$col][1], $ZETA_GRADIENT[-1], 'the curve ends in the last gradient color';
+    my $pixels = zeta_pixels();
+    is $pixels->[ $origin[0] ][ $origin[1] ], 98, 'the origin is marked in white';
+    my ($row, $col) = zeta_pixel(zeta(0.5, 0));
+    is $pixels->[$row][$col], nearest_color(gradient_rgb(\@ZETA_HUES, 0)),
+        'the curve starts in the first hue';
+    ($row, $col) = zeta_pixel(zeta(0.5, $ZETA_T_MAX));
+    is $pixels->[$row][$col], nearest_color(gradient_rgb(\@ZETA_HUES, 1)),
+        'the curve ends in the last hue';
+
+    my @rows = irc_lines(zeta_canvas());
+    like strip_colors($rows[0]), qr/zeta\(s\) = 1 \+ 1\/2\^s/, 'the title sits above the plot';
+    is scalar @rows, @$pixels / 2 + 3, 'one title row, the plot, and two footer rows';
 };
 
 subtest 'cmd_math with no piece lists the pieces' => sub {
