@@ -679,6 +679,56 @@ sub dragon_path {
     return @path;
 }
 
+# An elementary cellular automaton: a row of cells, each on or off, where the
+# next row's cell is decided by the cell above it and that cell's two
+# neighbors. Those three make a number from 0 to 7, and that bit of the rule
+# number says whether the new cell is on. Starts from one cell in the middle
+# of a row $width wide, cells past the ends counting as off, and returns
+# $count rows as lists of 0s and 1s.
+sub automaton_rows {
+    my ($rule, $width, $count) = @_;
+    my @row = (0) x $width;
+    $row[ int($width / 2) ] = 1;
+    my @rows = ([@row]);
+    while (@rows < $count) {
+        @row = map {
+            my $pattern = 4 * ($_ > 0 ? $row[ $_ - 1 ] : 0) + 2 * $row[$_] + ($_ < $width - 1 ? $row[ $_ + 1 ] : 0);
+            ($rule >> $pattern) & 1;
+        } 0 .. $width - 1;
+        push @rows, [@row];
+    }
+    return @rows;
+}
+
+# Rule 30 from a single cell: one side settles into stripes and the other
+# never settles at all; Mathematica used its middle column as a random number
+# generator. Each cell is two pixels wide so it draws square. The pattern
+# grows a cell each way per row, so it's worked out on a wider strip than the
+# frame shows, so the edges don't bend it.
+my @RULE30_HUES = (
+    [ 0,   255, 255, 0 ],
+    [ 0.4, 255, 140, 0 ],
+    [ 0.7, 255, 0,   0 ],
+    [ 1,   255, 0,   255 ],
+);
+
+sub rule30_canvas {
+    my ($cols, $rows) = (70, 48);
+    my $margin  = $rows;
+    my @palette = gradient_palette(\@RULE30_HUES);
+    my @lines   = automaton_rows(30, $cols + 2 * $margin, $rows);
+    my @pixels  = map {
+        my $r     = $_;
+        my $color = nearest_color_in(\@palette, gradient_rgb(\@RULE30_HUES, $r / ($rows - 1)));
+        [ map { ($lines[$r][ $margin + $_ ] ? $color : $BLACK) x 2 } 0 .. $cols - 1 ];
+    } 0 .. $rows - 1;
+    my $canvas = pixels_to_canvas(\@pixels);
+    put_text($canvas, 0, 1, 'rule 30:', 97);
+    put_text($canvas, 1, 1, 'new = left XOR', 94);
+    put_text($canvas, 2, 1, '(middle OR right)', 94);
+    return $canvas;
+}
+
 # The first $count digits of pi, starting with the 3, by Rabinowitz and
 # Wagon's spigot: pi is written in a mixed-radix form whose "digits" are all
 # 2, and each round multiplies that by 10 and carries from right to left,
@@ -1599,6 +1649,7 @@ our %PIECES = (
     ulam       => { draw => \&ulam_canvas,       about => 'the Ulam spiral, where the primes line up on diagonals' },
     burningship => { draw => \&burningship_canvas, about => 'the Burning Ship fractal, z^2 + c with the orbit folded' },
     dragon     => { draw => \&dragon_canvas,     about => 'the Heighway dragon, a strip of paper folded in half eight times' },
+    rule30     => { draw => \&rule30_canvas,     about => 'Wolfram\'s rule 30, one cell growing into chaos' },
     piwalk     => { draw => \&piwalk_canvas,     about => 'a walk steered by the first thousand digits of pi' },
     phase      => { draw => \&phase_canvas,      about => 'a phase portrait: zeros and poles of a complex function as color pinwheels' },
     buddhabrot => { draw => \&buddhabrot_canvas, about => 'the Buddhabrot: the paths of every point that escapes the Mandelbrot set' },

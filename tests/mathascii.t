@@ -316,6 +316,22 @@ subtest 'fern_points' => sub {
     is_deeply [ fern_points(500) ], [ @points[ 0 .. 499 ] ], 'the same every time';
 };
 
+subtest 'automaton_rows' => sub {
+    my $show = sub { join '', map { $_ ? 1 : 0 } @{ $_[0] } };
+    my @rows = automaton_rows(30, 7, 3);
+    is_deeply [ map { $show->($_) } @rows ], [ '0001000', '0011100', '0110010' ],
+        'rule 30 from one cell, worked by hand: 1, 111, 11001';
+
+    # Rule 90 sets each cell to the XOR of its neighbors, which is Pascal's
+    # rule mod 2, so from one cell it draws the odd binomial coefficients.
+    @rows = automaton_rows(90, 81, 40);
+    my @wrong = grep {
+        my $n = $_;
+        grep { ($rows[$n][ 40 - $n + 2 * $_ ] ? 1 : 0) != (binomial_is_odd($n, $_) ? 1 : 0) } 0 .. $n;
+    } 0 .. 39;
+    is_deeply \@wrong, [], 'rule 90 is Pascal\'s triangle mod 2';
+};
+
 subtest 'pi_digits' => sub {
     my @digits = pi_digits(800);
     is scalar @digits, 800, 'as many digits as asked for';
@@ -590,7 +606,7 @@ subtest 'cmd_math with no piece lists the pieces' => sub {
     my $server = FakeServer->new;
     my $item   = FakeItem->new;
     cmd_math('', $server, $item);
-    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian buddhabrot burningship chladni collatz dragon fern harmonograph hilbert julia koch logistic lorenz mandelbrot newton pascal phase piwalk seahorse sunflower timestable ulam zeta', 'CLIENTCRAP' ] ];
+    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian buddhabrot burningship chladni collatz dragon fern harmonograph hilbert julia koch logistic lorenz mandelbrot newton pascal phase piwalk rule30 seahorse sunflower timestable ulam zeta', 'CLIENTCRAP' ] ];
     is_deeply $server->{sent}, [], 'nothing was sent';
 };
 
@@ -633,6 +649,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'pascal        Pascal\'s triangle mod 2, which turns out to be Sierpinski\'s',
             'phase         a phase portrait: zeros and poles of a complex function as color pinwheels',
             'piwalk        a walk steered by the first thousand digits of pi',
+            'rule30        Wolfram\'s rule 30, one cell growing into chaos',
             'seahorse      a seahorse tail in Seahorse Valley, 600 times closer',
             'sunflower     seeds placed by the golden angle, falling into Fibonacci spirals',
             'timestable    times tables drawn on a circle, where a cardioid and a nephroid appear',
@@ -728,7 +745,7 @@ my @usage = (
 subtest 'cmd_math refuses bad input' => sub {
     my $item = FakeItem->new;
     cmd_math('nope', FakeServer->new, $item);
-    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian buddhabrot burningship chladni collatz dragon fern harmonograph hilbert julia koch logistic lorenz mandelbrot newton pascal phase piwalk seahorse sunflower timestable ulam zeta', 'CLIENTERROR' ] ],
+    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian buddhabrot burningship chladni collatz dragon fern harmonograph hilbert julia koch logistic lorenz mandelbrot newton pascal phase piwalk rule30 seahorse sunflower timestable ulam zeta', 'CLIENTERROR' ] ],
         'unknown piece';
 
     @printed = ();
