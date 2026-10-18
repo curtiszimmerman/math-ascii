@@ -287,6 +287,35 @@ sub glow_rgb {
     return map { $base->[$_] + $strength * ($hue->[$_] - $base->[$_]) } 0 .. 2;
 }
 
+# Draws a curve as a glowing line onto a grid of RGB pixels. The curve is a
+# list of closely spaced [row, col, position] points, in fractional pixels,
+# and each point's color is its position along the hues gradient. For every
+# pixel near the curve we find how close the curve comes; where the curve
+# crosses itself, the nearer strand wins.
+sub draw_glow_curve {
+    my ($rgb, $points, $hues) = @_;
+    my ($rows, $cols) = (scalar @$rgb, scalar @{ $rgb->[0] });
+    my (%distance, %position_at);
+    for my $point (@$points) {
+        my ($row, $col, $position) = @$point;
+        for my $r (POSIX::ceil($row - $GLOW_REACH / 2) .. POSIX::floor($row + $GLOW_REACH / 2)) {
+            next if $r < 0 || $r >= $rows;
+            for my $c (POSIX::ceil($col - $GLOW_REACH) .. POSIX::floor($col + $GLOW_REACH)) {
+                next if $c < 0 || $c >= $cols;
+                my $d = sqrt(($c - $col)**2 + (2 * ($r - $row))**2);
+                next if exists $distance{"$r,$c"} && $distance{"$r,$c"} <= $d;
+                $distance{"$r,$c"}    = $d;
+                $position_at{"$r,$c"} = $position;
+            }
+        }
+    }
+    for my $key (keys %distance) {
+        my ($r, $c) = split /,/, $key;
+        my @hue = gradient_rgb($hues, $position_at{$key});
+        $rgb->[$r][$c] = [ glow_rgb($rgb->[$r][$c], \@hue, $distance{$key}) ];
+    }
+}
+
 # The zeta piece traces zeta(1/2 + it) in the complex plane as t runs from 0
 # to $ZETA_T_MAX, as a glowing line whose hue runs from violet to pink with t.
 # The curve passes through the origin at every zero on the critical line.
@@ -333,28 +362,11 @@ sub zeta_pixels {
         [ map { [ $r == $origin_row || $_ == $origin_col ? @ZETA_AXIS : @ZETA_BACKGROUND ] } 0 .. $pixel_cols - 1 ];
     } 0 .. $ZETA_PIXEL_ROWS - 1;
 
-    # For every pixel near the curve, find how close the curve comes and at
-    # which t. Where the curve crosses itself, the nearer strand wins.
-    my (%distance, %t_at);
-    for my $i (0 .. $ZETA_SAMPLES) {
-        my $t = $ZETA_T_MAX * $i / $ZETA_SAMPLES;
-        my ($row, $col) = zeta_pixel_position(zeta(0.5, $t));
-        for my $r (POSIX::ceil($row - $GLOW_REACH / 2) .. POSIX::floor($row + $GLOW_REACH / 2)) {
-            next if $r < 0 || $r >= $ZETA_PIXEL_ROWS;
-            for my $c (POSIX::ceil($col - $GLOW_REACH) .. POSIX::floor($col + $GLOW_REACH)) {
-                next if $c < 0 || $c >= $pixel_cols;
-                my $d = sqrt(($c - $col)**2 + (2 * ($r - $row))**2);
-                next if exists $distance{"$r,$c"} && $distance{"$r,$c"} <= $d;
-                $distance{"$r,$c"} = $d;
-                $t_at{"$r,$c"}     = $t;
-            }
-        }
-    }
-    for my $key (keys %distance) {
-        my ($r, $c) = split /,/, $key;
-        my @hue = gradient_rgb(\@ZETA_HUES, $t_at{$key} / $ZETA_T_MAX);
-        $rgb[$r][$c] = [ glow_rgb($rgb[$r][$c], \@hue, $distance{$key}) ];
-    }
+    my @points = map {
+        my $t = $ZETA_T_MAX * $_ / $ZETA_SAMPLES;
+        [ zeta_pixel_position(zeta(0.5, $t)), $t / $ZETA_T_MAX ];
+    } 0 .. $ZETA_SAMPLES;
+    draw_glow_curve(\@rgb, \@points, \@ZETA_HUES);
 
     my @pixels = map { [ map { nearest_color(@$_) } @$_ ] } @rgb;
     # Three pixels across makes a dot about as wide as it is tall.
@@ -369,6 +381,68 @@ sub zeta_canvas {
     put_text($footer, 0, 2, "the path of zeta(1/2 + it) as t runs from 0 (violet) to $ZETA_T_MAX (pink).", 95);
     put_text($footer, 1, 2, 'it hits the white dot at t = 14.13, 21.02, 25.01: all zeros on 1/2?', 95);
     return [ @$title, @{ pixels_to_canvas(zeta_pixels()) }, @$footer ];
+}
+
+# The Lorenz system, dx/dt = 10(y - x), dy/dt = x(28 - z) - y,
+# dz/dt = xy - 8z/3: a simplified model of convection that never settles and
+# never repeats, looping around two wings in an order nobody can predict.
+sub lorenz_velocity {
+    my ($x, $y, $z) = @_;
+    return (10 * ($y - $x), $x * (28 - $z) - $y, $x * $y - 8 / 3 * $z);
+}
+
+# $count points along the attractor, as [x, y, z], by fourth-order
+# Runge-Kutta. The steps are small enough that consecutive points land about a
+# pixel apart in the drawing. The first stretch is dropped, because the start
+# at (1, 1, 1) is a transient that isn't on the attractor yet.
+sub lorenz_points {
+    my ($count) = @_;
+    my $dt     = 0.005;
+    my $settle = 4000;
+    my @p      = (1, 1, 1);
+    my @points;
+    for my $step (1 .. $settle + $count) {
+        my @k1 = lorenz_velocity(@p);
+        my @k2 = lorenz_velocity(map { $p[$_] + $dt / 2 * $k1[$_] } 0 .. 2);
+        my @k3 = lorenz_velocity(map { $p[$_] + $dt / 2 * $k2[$_] } 0 .. 2);
+        my @k4 = lorenz_velocity(map { $p[$_] + $dt * $k3[$_] } 0 .. 2);
+        @p = map { $p[$_] + $dt / 6 * ($k1[$_] + 2 * $k2[$_] + 2 * $k3[$_] + $k4[$_]) } 0 .. 2;
+        push @points, [@p] if $step > $settle;
+    }
+    return @points;
+}
+
+# Seen from the side (x across, z up) the attractor is a butterfly. The color
+# follows time, from blue at the start to red at the end, so you can trace the
+# path as it switches wings. Too long a path fills the wings solid, so it's
+# only a dozen or so loops.
+my @LORENZ_HUES = (
+    [ 0,    0,   60,  255 ],
+    [ 0.3,  0,   220, 255 ],
+    [ 0.5,  255, 255, 255 ],
+    [ 0.7,  255, 200, 0 ],
+    [ 1,    255, 70,  0 ],
+);
+
+sub lorenz_canvas {
+    my ($cols, $pixel_rows) = (70, 48);
+
+    # z runs from about 0 to 50 up the full height; pixels are twice as tall
+    # as wide.
+    my $step = 50 / (2 * $pixel_rows);
+    my @rgb  = map { [ map { [ 0, 0, 0 ] } 1 .. 2 * $cols ] } 1 .. $pixel_rows;
+    my @path   = lorenz_points(3000);
+    my @points = map {
+        my ($x, undef, $z) = @{ $path[$_] };
+        [ (50 - $z) / (2 * $step) - 0.5, $x / $step + $cols - 0.5, $_ / $#path ];
+    } 0 .. $#path;
+    draw_glow_curve(\@rgb, \@points, \@LORENZ_HUES);
+
+    my $canvas = pixels_to_canvas([ map { [ map { nearest_color(@$_) } @$_ ] } @rgb ]);
+    put_text($canvas, 21, 1, 'dx/dt = 10(y - x)',     95);
+    put_text($canvas, 22, 1, 'dy/dt = x(28 - z) - y', 95);
+    put_text($canvas, 23, 1, 'dz/dt = xy - 8z/3',     95);
+    return $canvas;
 }
 
 # Follows z -> z^2 + c from the starting z given. If z runs away within
@@ -548,6 +622,7 @@ our %PIECES = (
     seahorse   => { draw => \&seahorse_canvas,   about => 'a seahorse tail in Seahorse Valley, 600 times closer' },
     zeta       => { draw => \&zeta_canvas,       about => 'the path of zeta(1/2 + it) through its first three zeros' },
     julia      => { draw => \&julia_canvas,      about => 'the Julia set called Douady\'s rabbit, ears within ears' },
+    lorenz     => { draw => \&lorenz_canvas,     about => 'the Lorenz attractor, the butterfly of chaos' },
 );
 
 sub piece_list { return join ' ', sort keys %PIECES }

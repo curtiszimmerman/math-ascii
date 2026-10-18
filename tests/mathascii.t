@@ -143,6 +143,28 @@ subtest 'glow_rgb' => sub {
     ok $near[0] > $far[0] && $far[0] > 0, 'the glow fades with distance';
 };
 
+subtest 'draw_glow_curve' => sub {
+    my @rgb = map { [ map { [ 0, 0, 0 ] } 1 .. 20 ] } 1 .. 10;
+    my @hues = ([ 0, 255, 0, 0 ], [ 1, 0, 0, 255 ]);
+
+    # Two strands: a red one through (5, 5) and a blue one through (5, 7).
+    draw_glow_curve(\@rgb, [ [ 5, 5, 0 ], [ 5, 7, 1 ] ], \@hues);
+    is_deeply $rgb[5][5], [ 255, 0, 0 ], 'full hue on the curve';
+    is_deeply $rgb[5][7], [ 0, 0, 255 ], 'each point takes its own hue';
+    is_deeply $rgb[5][6], [ 255, 0, 0 ], 'between strands, the first one at the same distance keeps it';
+    ok $rgb[5][9][2] > 0 && $rgb[5][9][2] < 255, 'it glows a little way off';
+    is_deeply $rgb[5][15], [ 0, 0, 0 ], 'and leaves far pixels alone';
+    is_deeply $rgb[9][5], [ 0, 0, 0 ], 'rows count double, since pixels are twice as tall as wide';
+};
+
+subtest 'lorenz_points' => sub {
+    my @points = lorenz_points(4000);
+    is scalar @points, 4000, 'one point per step';
+    is_deeply [ grep { abs($_->[0]) > 25 || abs($_->[1]) > 30 || $_->[2] < 0 || $_->[2] > 55 } @points ], [],
+        'the trajectory stays inside the attractor\'s bounding box';
+    ok((grep { $_->[0] > 5 } @points) && (grep { $_->[0] < -5 } @points), 'and loops around both wings');
+};
+
 subtest 'irc_lines' => sub {
     my $full  = $QUADRANT[15];
     my $upper = $QUADRANT[3];
@@ -283,7 +305,7 @@ subtest 'cmd_math with no piece lists the pieces' => sub {
     my $server = FakeServer->new;
     my $item   = FakeItem->new;
     cmd_math('', $server, $item);
-    is_deeply $item->{printed}, [ [ 'math: pieces: julia mandelbrot seahorse zeta', 'CLIENTCRAP' ] ];
+    is_deeply $item->{printed}, [ [ 'math: pieces: julia lorenz mandelbrot seahorse zeta', 'CLIENTCRAP' ] ];
     is_deeply $server->{sent}, [], 'nothing was sent';
 };
 
@@ -309,6 +331,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
     is_deeply $item->{printed}, [
         map { [ "math: $_", 'CLIENTCRAP' ] }
             'julia       the Julia set called Douady\'s rabbit, ears within ears',
+            'lorenz      the Lorenz attractor, the butterfly of chaos',
             'mandelbrot  the whole Mandelbrot set, glowing toward its edge',
             'seahorse    a seahorse tail in Seahorse Valley, 600 times closer',
             'zeta        the path of zeta(1/2 + it) through its first three zeros',
@@ -394,7 +417,7 @@ subtest 'things that change while a piece is drawing' => sub {
 subtest 'cmd_math refuses bad input' => sub {
     my $item = FakeItem->new;
     cmd_math('nope', FakeServer->new, $item);
-    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: julia mandelbrot seahorse zeta', 'CLIENTERROR' ] ],
+    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: julia lorenz mandelbrot seahorse zeta', 'CLIENTERROR' ] ],
         'unknown piece';
 
     @printed = ();
