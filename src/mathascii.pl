@@ -529,6 +529,78 @@ sub burningship_canvas {
     return $canvas;
 }
 
+# Barnsley's fern: start anywhere, then over and over pick one of four
+# affine maps at random and apply it. The points pile up into a fern, because
+# each map shrinks the whole fern into one part of itself: the stem, the next
+# frond up, or the lowest leaflet on either side. Each map is
+# [chance, a, b, c, d, e, f] for (x, y) -> (ax + by + e, cx + dy + f).
+my @FERN_MAPS = (
+    [ 0.01, 0,     0,     0,     0.16, 0, 0 ],
+    [ 0.85, 0.85,  0.04,  -0.04, 0.85, 0, 1.6 ],
+    [ 0.07, 0.2,   -0.26, 0.23,  0.22, 0, 1.6 ],
+    [ 0.07, -0.15, 0.28,  0.26,  0.24, 0, 0.44 ],
+);
+
+# $count points of the fern, as [x, y]. The randomness comes from a little
+# generator of our own with a fixed seed, so the fern comes out the same every
+# time and nothing else's use of rand changes it.
+sub fern_points {
+    my ($count) = @_;
+    my ($x, $y, $seed) = (0, 0, 20261018);
+    my @points;
+    for (1 .. $count) {
+        $seed = ($seed * 1103515245 + 12345) % 2147483648;
+        my $roll = $seed / 2147483648;
+        my $map  = $FERN_MAPS[-1];
+        for my $candidate (@FERN_MAPS) {
+            if ($roll < $candidate->[0]) {
+                $map = $candidate;
+                last;
+            }
+            $roll -= $candidate->[0];
+        }
+        my (undef, $a, $b, $c, $d, $e, $f) = @$map;
+        ($x, $y) = ($a * $x + $b * $y + $e, $c * $x + $d * $y + $f);
+        push @points, [ $x, $y ];
+    }
+    return @points;
+}
+
+# The fern is about 10 long and 5 wide. Standing up it would get only a third
+# of the width and its leaflets would be smaller than a pixel, so it lies on
+# its side with the stem at the left. It's colored by how many points land in
+# each pixel: dark green where few do, bright where they pile up.
+my @FERN_GREENS = (
+    [ 0,   0,   60,  0 ],
+    [ 0.4, 0,   170, 40 ],
+    [ 0.8, 150, 255, 80 ],
+    [ 1,   230, 255, 200 ],
+);
+
+sub fern_canvas {
+    my ($pixel_cols, $pixel_rows) = (140, 48);
+    my $step = 10.2 / $pixel_cols;    # the width of a pixel, in fern units
+    my %hits;
+    # Too many points fill in the gaps between the leaflets.
+    for my $point (fern_points(10_000)) {
+        my ($x, $y) = @$point;
+        my $row = int(($x + 2.3) / (2 * $step)) + 7;
+        my $col = int($y / $step) + 1;
+        $hits{$row}{$col}++;
+    }
+    my $most    = log(List::Util::max(map { values %$_ } values %hits));
+    my @palette = gradient_palette(\@FERN_GREENS);
+    my @pixels  = map {
+        my $r = $_;
+        [ map { $hits{$r}{$_} ? nearest_color_in(\@palette, gradient_rgb(\@FERN_GREENS, log(1 + $hits{$r}{$_}) / $most)) : $BLACK } 0 .. $pixel_cols - 1 ];
+    } 0 .. $pixel_rows - 1;
+
+    my $canvas = pixels_to_canvas(\@pixels);
+    put_text($canvas, 0, 34, "Barnsley's fern: four affine maps,", 97);
+    put_text($canvas, 1, 34, 'one picked at random, over and over', 94);
+    return $canvas;
+}
+
 # Whether the binomial coefficient C(n, k) is odd. By Lucas's theorem it is
 # exactly when every bit set in k is also set in n.
 sub binomial_is_odd {
@@ -827,6 +899,7 @@ our %PIECES = (
     newton     => { draw => \&newton_canvas,     about => 'Newton\'s method on z^3 - 1, three basins with a fractal border' },
     ulam       => { draw => \&ulam_canvas,       about => 'the Ulam spiral, where the primes line up on diagonals' },
     burningship => { draw => \&burningship_canvas, about => 'the Burning Ship fractal, z^2 + c with the orbit folded' },
+    fern       => { draw => \&fern_canvas,       about => 'Barnsley\'s fern, grown from four random affine maps' },
     pascal     => { draw => \&pascal_canvas,     about => 'Pascal\'s triangle mod 2, which turns out to be Sierpinski\'s' },
 );
 

@@ -301,6 +301,16 @@ subtest 'escape_time with the burning ship fold' => sub {
     ok defined escape_time(0, 0, 0, 1, 500, 1), 'and escapes with it';
 };
 
+subtest 'fern_points' => sub {
+    my @points = fern_points(20_000);
+    is scalar @points, 20_000, 'one point per step';
+    is_deeply [ grep { $_->[0] < -2.19 || $_->[0] > 2.66 || $_->[1] < 0 || $_->[1] > 10 } @points ], [],
+        'every point is inside the fern\'s bounding box';
+    ok((grep { $_->[0] < -1.5 } @points) && (grep { $_->[0] > 1.5 } @points) && (grep { $_->[1] > 9 } @points),
+        'and they reach out to both sides and up to the tip');
+    is_deeply [ fern_points(500) ], [ @points[ 0 .. 499 ] ], 'the same every time';
+};
+
 subtest 'binomial_is_odd' => sub {
     # Build Pascal's triangle the slow way and compare.
     my @row = (1);
@@ -363,7 +373,7 @@ subtest 'cmd_math with no piece lists the pieces' => sub {
     my $server = FakeServer->new;
     my $item   = FakeItem->new;
     cmd_math('', $server, $item);
-    is_deeply $item->{printed}, [ [ 'math: pieces: burningship julia lorenz mandelbrot newton pascal seahorse ulam zeta', 'CLIENTCRAP' ] ];
+    is_deeply $item->{printed}, [ [ 'math: pieces: burningship fern julia lorenz mandelbrot newton pascal seahorse ulam zeta', 'CLIENTCRAP' ] ];
     is_deeply $server->{sent}, [], 'nothing was sent';
 };
 
@@ -389,6 +399,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
     is_deeply $item->{printed}, [
         map { [ "math: $_", 'CLIENTCRAP' ] }
             'burningship  the Burning Ship fractal, z^2 + c with the orbit folded',
+            'fern         Barnsley\'s fern, grown from four random affine maps',
             'julia        the Julia set called Douady\'s rabbit, ears within ears',
             'lorenz       the Lorenz attractor, the butterfly of chaos',
             'mandelbrot   the whole Mandelbrot set, glowing toward its edge',
@@ -479,7 +490,7 @@ subtest 'things that change while a piece is drawing' => sub {
 subtest 'cmd_math refuses bad input' => sub {
     my $item = FakeItem->new;
     cmd_math('nope', FakeServer->new, $item);
-    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: burningship julia lorenz mandelbrot newton pascal seahorse ulam zeta', 'CLIENTERROR' ] ],
+    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: burningship fern julia lorenz mandelbrot newton pascal seahorse ulam zeta', 'CLIENTERROR' ] ],
         'unknown piece';
 
     @printed = ();
