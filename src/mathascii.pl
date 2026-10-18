@@ -319,6 +319,34 @@ sub draw_glow_curve {
     }
 }
 
+# A whole frame of glowing lines on black: draws the points with
+# draw_glow_curve and snaps every pixel to the hues' own palette colors.
+sub glow_lines_canvas {
+    my ($points, $hues, $width) = @_;
+    my @rgb = map { [ map { [ 0, 0, 0 ] } 1 .. 140 ] } 1 .. 48;
+    draw_glow_curve(\@rgb, $points, $hues, $width);
+    my @palette = (gradient_palette($hues), $BLACK);
+    return pixels_to_canvas([ map { [ map { nearest_color_in(\@palette, @$_) } @$_ ] } @rgb ]);
+}
+
+# Points every pixel or so along a straight line between two [row, col]
+# pixel positions, for draw_glow_curve, all at the same gradient position.
+sub line_points {
+    my ($from, $to, $position) = @_;
+    my $steps = POSIX::ceil(abs($to->[1] - $from->[1]) + 2 * abs($to->[0] - $from->[0]));
+    return map {
+        [ $from->[0] + ($to->[0] - $from->[0]) * $_ / $steps, $from->[1] + ($to->[1] - $from->[1]) * $_ / $steps, $position ]
+    } 0 .. $steps;
+}
+
+# Where a point (x, y) of a drawing centered on the frame lands, as fractional
+# [row, col] pixels, with $scale pixels to a unit across. Pixels are twice as
+# tall as wide, so a unit is half as many rows down.
+sub centered_pixel {
+    my ($x, $y, $scale) = @_;
+    return [ 24 - $y * $scale / 2 - 0.5, 70 + $x * $scale - 0.5 ];
+}
+
 # The zeta piece traces zeta(1/2 + it) in the complex plane as t runs from 0
 # to $ZETA_T_MAX, as a glowing line whose hue runs from violet to pink with t.
 # The curve passes through the origin at every zero on the critical line.
@@ -705,18 +733,10 @@ sub harmonograph_points {
 # Drawn as a thin glowing line whose hue runs with time, from the wide early
 # swings at the outside to the small late ones in the middle.
 sub harmonograph_canvas {
-    my ($pixel_cols, $pixel_rows) = (140, 48);
-    my $scale = 22;    # pixels per unit across; rows are half that
     # Running longer piles the small late loops up into a blur in the middle.
-    my @path  = harmonograph_points(5_000);
-    my @points = map {
-        my ($x, $y) = @{ $path[$_] };
-        [ $pixel_rows / 2 - $y * $scale / 2 - 0.5, $pixel_cols / 2 + $x * $scale - 0.5, $_ / $#path ];
-    } 0 .. $#path;
-    my @rgb = map { [ map { [ 0, 0, 0 ] } 1 .. $pixel_cols ] } 1 .. $pixel_rows;
-    draw_glow_curve(\@rgb, \@points, \@ZETA_HUES, 0.5);
-    my @palette = (gradient_palette(\@ZETA_HUES), $BLACK);
-    return pixels_to_canvas([ map { [ map { nearest_color_in(\@palette, @$_) } @$_ ] } @rgb ]);
+    my @path   = harmonograph_points(5_000);
+    my @points = map { [ @{ centered_pixel(@{ $path[$_] }, 22) }, $_ / $#path ] } 0 .. $#path;
+    return glow_lines_canvas(\@points, \@ZETA_HUES, 0.5);
 }
 
 # Vogel's model of a sunflower head: seed n sits at n golden angles around
@@ -744,25 +764,18 @@ sub sunflower_seeds {
 my @SUNFLOWER_HUES = ([ 0, 255, 190, 0 ], [ 1, 255, 40, 200 ]);
 
 sub sunflower_canvas {
-    my ($pixel_cols, $pixel_rows) = (140, 48);
     my $spacing = 3.7;
-    my @seeds   = map { [ $pixel_rows / 2 - $_->[1] / 2 - 0.5, $pixel_cols / 2 + $_->[0] - 0.5 ] } sunflower_seeds(150, $spacing);
+    my @seeds   = map { centered_pixel(@$_, 1) } sunflower_seeds(150, $spacing);
     my @points;
     for my $family ([ 13, 0 ], [ 21, 1 ]) {
         my ($gap, $position) = @$family;
         for my $n ($gap .. $#seeds) {
             my ($from, $to) = @seeds[ $n - $gap, $n ];
             next if ($to->[1] - $from->[1])**2 + (2 * ($to->[0] - $from->[0]))**2 > (2.6 * $spacing)**2;
-            my $steps = POSIX::ceil(abs($to->[1] - $from->[1]) + 2 * abs($to->[0] - $from->[0]));
-            push @points, map {
-                [ $from->[0] + ($to->[0] - $from->[0]) * $_ / $steps, $from->[1] + ($to->[1] - $from->[1]) * $_ / $steps, $position ]
-            } 0 .. $steps;
+            push @points, line_points($from, $to, $position);
         }
     }
-    my @rgb = map { [ map { [ 0, 0, 0 ] } 1 .. $pixel_cols ] } 1 .. $pixel_rows;
-    draw_glow_curve(\@rgb, \@points, \@SUNFLOWER_HUES, 0.5);
-    my @palette = (gradient_palette(\@SUNFLOWER_HUES), $BLACK);
-    return pixels_to_canvas([ map { [ map { nearest_color_in(\@palette, @$_) } @$_ ] } @rgb ]);
+    return glow_lines_canvas(\@points, \@SUNFLOWER_HUES, 0.5);
 }
 
 # The Hilbert curve of the given order: one unbroken path through every cell
@@ -840,10 +853,7 @@ sub grid_path_canvas {
             push @points, [ $top + ($max_y - $y) * $scale / 2, $left + ($x - $min_x) * $scale, $i / $#path ];
         }
     }
-    my @rgb = map { [ map { [ 0, 0, 0 ] } 1 .. $pixel_cols ] } 1 .. $pixel_rows;
-    draw_glow_curve(\@rgb, \@points, \@ZETA_HUES, 0.5);
-    my @palette = (gradient_palette(\@ZETA_HUES), $BLACK);
-    return pixels_to_canvas([ map { [ map { nearest_color_in(\@palette, @$_) } @$_ ] } @rgb ]);
+    return glow_lines_canvas(\@points, \@ZETA_HUES, 0.5);
 }
 
 # Whether the binomial coefficient C(n, k) is odd. By Lucas's theorem it is
