@@ -678,6 +678,44 @@ sub dragon_path {
     return @path;
 }
 
+# The logistic map, x -> r x (1 - x), a toy model of a population that grows
+# but is held back by crowding. Returns $count values of x after letting it
+# settle for $settle steps from x = 0.5. For small r it settles on one value;
+# past r = 3 it flips between two, then four, then eight, the doublings coming
+# faster and faster (by Feigenbaum's constant, 4.669...) until around 3.57 it
+# never repeats at all.
+sub logistic_orbit {
+    my ($r, $settle, $count) = @_;
+    my $x = 0.5;
+    $x = $r * $x * (1 - $x) for 1 .. $settle;
+    return map { $x = $r * $x * (1 - $x) } 1 .. $count;
+}
+
+# The bifurcation diagram: r runs across from 2.8 to 4 and every value x
+# settles into is marked above it, brighter where it lands more often. The
+# stops are palette colors (28, 52, 53, 54, 98) so blends don't land on gray.
+my @LOGISTIC_GLOW = (
+    [ 0,    116, 0,   0 ],
+    [ 0.3,  255, 0,   0 ],
+    [ 0.6,  255, 140, 0 ],
+    [ 0.85, 255, 255, 0 ],
+    [ 1,    255, 255, 255 ],
+);
+
+sub logistic_canvas {
+    my %hits;
+    for my $sub_column (0 .. 4 * 140 - 1) {
+        my $r = 2.8 + 1.2 * ($sub_column + 0.5) / (4 * 140);
+        for my $x (logistic_orbit($r, 500, 200)) {
+            $hits{ int((1 - $x) * 48) . ',' . int($sub_column / 4) }++;
+        }
+    }
+    my $canvas = density_canvas(\%hits, \@LOGISTIC_GLOW, 0.9, 0.5);
+    put_text($canvas, 0, 1, 'x -> r x (1 - x)', 97);
+    put_text($canvas, 1, 1, 'r from 2.8 to 4', 94);
+    return $canvas;
+}
+
 # The Apollonian gasket: inside a circle put three equal circles that all
 # touch each other and it, then fill every curved gap with the biggest circle
 # that fits, and the new gaps the same way, forever. Circles are
@@ -1382,6 +1420,7 @@ our %PIECES = (
     ulam       => { draw => \&ulam_canvas,       about => 'the Ulam spiral, where the primes line up on diagonals' },
     burningship => { draw => \&burningship_canvas, about => 'the Burning Ship fractal, z^2 + c with the orbit folded' },
     dragon     => { draw => \&dragon_canvas,     about => 'the Heighway dragon, a strip of paper folded in half eight times' },
+    logistic   => { draw => \&logistic_canvas,   about => 'the logistic map doubling its period over and over until it turns to chaos' },
     apollonian => { draw => \&apollonian_canvas, about => 'the Apollonian gasket, every gap between circles filled with another circle' },
     collatz    => { draw => \&collatz_canvas,    about => 'the Collatz coral: every trip down to 1, bending left on even, right on odd' },
     timestable => { draw => \&timestable_canvas, about => 'times tables drawn on a circle, where a cardioid and a nephroid appear' },

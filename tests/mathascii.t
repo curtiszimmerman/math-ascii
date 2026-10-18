@@ -316,6 +316,17 @@ subtest 'fern_points' => sub {
     is_deeply [ fern_points(500) ], [ @points[ 0 .. 499 ] ], 'the same every time';
 };
 
+subtest 'logistic_orbit' => sub {
+    my $distinct = sub { my %seen = map { sprintf('%.6f', $_) => 1 } @_; return sort keys %seen };
+    is_deeply [ $distinct->(logistic_orbit(2.8, 1000, 100)) ], [ sprintf '%.6f', 1 - 1 / 2.8 ],
+        'r = 2.8 settles on 1 - 1/r';
+    my $r = 3.2;
+    my @pair = map { sprintf '%.6f', ($r + 1 + $_ * sqrt(($r + 1) * ($r - 3))) / (2 * $r) } -1, 1;
+    is_deeply [ $distinct->(logistic_orbit($r, 1000, 100)) ], \@pair, 'r = 3.2 flips between the two values of the 2-cycle';
+    is scalar(my @four = $distinct->(logistic_orbit(3.5, 1000, 100))), 4, 'r = 3.5 has doubled again, to 4';
+    ok scalar(my @many = $distinct->(logistic_orbit(3.9, 1000, 100))) > 50, 'r = 3.9 is chaos';
+};
+
 subtest 'apollonian_circles' => sub {
     my @circles = apollonian_circles(0.04);
     my @first   = map { $_->[0] } @circles[ 0 .. 3 ];
@@ -542,7 +553,7 @@ subtest 'cmd_math with no piece lists the pieces' => sub {
     my $server = FakeServer->new;
     my $item   = FakeItem->new;
     cmd_math('', $server, $item);
-    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian burningship chladni collatz dragon fern harmonograph hilbert julia koch lorenz mandelbrot newton pascal seahorse sunflower timestable ulam zeta', 'CLIENTCRAP' ] ];
+    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian burningship chladni collatz dragon fern harmonograph hilbert julia koch logistic lorenz mandelbrot newton pascal seahorse sunflower timestable ulam zeta', 'CLIENTCRAP' ] ];
     is_deeply $server->{sent}, [], 'nothing was sent';
 };
 
@@ -577,6 +588,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'hilbert       the Hilbert curve, one line through all 256 squares of a grid',
             'julia         the Julia set called Douady\'s rabbit, ears within ears',
             'koch          the Koch snowflake, an infinitely long edge around a finite area',
+            'logistic      the logistic map doubling its period over and over until it turns to chaos',
             'lorenz        the Lorenz attractor, the butterfly of chaos',
             'mandelbrot    the whole Mandelbrot set, glowing toward its edge',
             'newton        Newton\'s method on z^3 - 1, three basins with a fractal border',
@@ -668,7 +680,7 @@ subtest 'things that change while a piece is drawing' => sub {
 subtest 'cmd_math refuses bad input' => sub {
     my $item = FakeItem->new;
     cmd_math('nope', FakeServer->new, $item);
-    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian burningship chladni collatz dragon fern harmonograph hilbert julia koch lorenz mandelbrot newton pascal seahorse sunflower timestable ulam zeta', 'CLIENTERROR' ] ],
+    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian burningship chladni collatz dragon fern harmonograph hilbert julia koch logistic lorenz mandelbrot newton pascal seahorse sunflower timestable ulam zeta', 'CLIENTERROR' ] ],
         'unknown piece';
 
     @printed = ();
