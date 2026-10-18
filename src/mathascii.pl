@@ -329,6 +329,26 @@ sub glow_lines_canvas {
     return pixels_to_canvas([ map { [ map { nearest_color_in(\@palette, @$_) } @$_ ] } @rgb ]);
 }
 
+# A whole frame colored by how many times something landed on each pixel.
+# $counts maps "row,col" to a count; pixels nobody landed on stay black. The
+# count that reaches the top of the gradient is the one at the $top
+# percentile, so a few very busy pixels don't leave everything else dim, and
+# $power below 1 brightens the quiet pixels, above 1 darkens them.
+sub density_canvas {
+    my ($counts, $gradient, $top, $power) = @_;
+    my @sorted  = sort { $a <=> $b } values %$counts;
+    my $most    = $sorted[ int($top * $#sorted) ];
+    my @palette = gradient_palette($gradient);
+    my @pixels  = map {
+        my $r = $_;
+        [ map {
+            my $count = $counts->{"$r,$_"};
+            $count ? nearest_color_in(\@palette, gradient_rgb($gradient, List::Util::min(1, $count / $most)**$power)) : $BLACK;
+        } 0 .. 139 ];
+    } 0 .. 47;
+    return pixels_to_canvas(\@pixels);
+}
+
 # Points every pixel or so along a straight line between two [row, col]
 # pixel positions, for draw_glow_curve, all at the same gradient position.
 sub line_points {
@@ -822,14 +842,7 @@ sub timestable_canvas {
     # the scattered chords elsewhere stay dim. The cusps are far more crowded
     # than anywhere else, so the scale tops out at the 95th percentile rather
     # than the very busiest pixel, or the rest of the curve would be dim too.
-    my @counts  = sort { $a <=> $b } values %crossings;
-    my $most    = $counts[ int(0.95 * $#counts) ];
-    my @palette = gradient_palette(\@TIMESTABLE_GLOW);
-    my @pixels  = map {
-        my $r = $_;
-        [ map { my $count = $crossings{"$r,$_"}; $count ? nearest_color_in(\@palette, gradient_rgb(\@TIMESTABLE_GLOW, List::Util::min(1, $count / $most))) : $BLACK } 0 .. 139 ];
-    } 0 .. 47;
-    my $canvas = pixels_to_canvas(\@pixels);
+    my $canvas = density_canvas(\%crossings, \@TIMESTABLE_GLOW, 0.95, 1);
     put_text($canvas, 0, 9,  "k -> 2k mod $n", 97);
     put_text($canvas, 0, 44, "k -> 3k mod $n", 97);
     return $canvas;
