@@ -679,6 +679,80 @@ sub dragon_path {
     return @path;
 }
 
+# Conway's Game of Life on an unbounded board, kept as a hash of the live
+# cells by "x,y". A live cell survives with two or three live neighbors, and
+# a dead one comes alive with exactly three.
+sub life_step {
+    my ($alive) = @_;
+    my %neighbors;
+    for my $cell (keys %$alive) {
+        my ($x, $y) = split /,/, $cell;
+        for my $dx (-1 .. 1) {
+            for my $dy (-1 .. 1) {
+                $neighbors{ ($x + $dx) . ',' . ($y + $dy) }++ if $dx || $dy;
+            }
+        }
+    }
+    return { map { ($_ => 1) } grep { $neighbors{$_} == 3 || ($neighbors{$_} == 2 && $alive->{$_}) } keys %neighbors };
+}
+
+# Reads a pattern in RLE, the run-length format Life patterns are shared in:
+# b is a dead cell, o a live one, $ ends a row, a number repeats what follows,
+# and ! ends the pattern. Returns the live cells as [x, y], y counting down.
+sub rle_cells {
+    my ($rle) = @_;
+    my ($x, $y) = (0, 0);
+    my @cells;
+    while ($rle =~ /(\d*)([bo\$!])/g) {
+        my ($run, $what) = ($1 || 1, $2);
+        last if $what eq '!';
+        if ($what eq '$') {
+            ($x, $y) = (0, $y + $run);
+        } else {
+            push @cells, map { [ $x + $_, $y ] } 0 .. $run - 1 if $what eq 'o';
+            $x += $run;
+        }
+    }
+    return @cells;
+}
+
+# Bill Gosper's glider gun, the first pattern found that grows forever: it
+# fires a glider every 30 generations.
+our $GOSPER_GUN = '24bo$22bobo$12b2o6b2o12b2o$11bo3bo4b2o12b2o$2o8bo5bo3b2o$2o8bo3bob2o4bobo$10bo5bo7bo$11bo3bo$12b2o!';
+
+# The gun after a few hundred generations, with a stream of gliders heading
+# off down the frame. Each cell is two pixels wide so it draws square, and
+# cells leave a fading trail for the last few generations they were alive,
+# so you can see which way everything is moving.
+my @LIFE_TRAIL = (
+    [ 0,   0,   0,   71 ],
+    [ 0.5, 0,   99,  181 ],
+    [ 0.8, 0,   255, 255 ],
+    [ 1,   255, 255, 255 ],
+);
+
+sub life_canvas {
+    my ($cols, $rows, $trail) = (70, 48, 8);
+    my $alive = { map { (($_->[0] + 2) . ',' . ($_->[1] + 2) => 1) } rle_cells($GOSPER_GUN) };
+    my %last_seen;
+    for my $generation (1 .. 240) {
+        $alive = life_step($alive);
+        $last_seen{$_} = $generation for keys %$alive;
+    }
+    my @palette = gradient_palette(\@LIFE_TRAIL);
+    my @pixels  = map {
+        my $y = $_;
+        [ map {
+            my $age = 240 - ($last_seen{"$_,$y"} // -1000);
+            ($age < $trail ? nearest_color_in(\@palette, gradient_rgb(\@LIFE_TRAIL, 1 - $age / $trail)) : $BLACK) x 2;
+        } 0 .. $cols - 1 ];
+    } 0 .. $rows - 1;
+    my $canvas = pixels_to_canvas(\@pixels);
+    put_text($canvas, 22, 1, "Gosper's glider gun:",         97);
+    put_text($canvas, 23, 1, 'a glider every 30 generations', 94);
+    return $canvas;
+}
+
 # An elementary cellular automaton: a row of cells, each on or off, where the
 # next row's cell is decided by the cell above it and that cell's two
 # neighbors. Those three make a number from 0 to 7, and that bit of the rule
@@ -1649,6 +1723,7 @@ our %PIECES = (
     ulam       => { draw => \&ulam_canvas,       about => 'the Ulam spiral, where the primes line up on diagonals' },
     burningship => { draw => \&burningship_canvas, about => 'the Burning Ship fractal, z^2 + c with the orbit folded' },
     dragon     => { draw => \&dragon_canvas,     about => 'the Heighway dragon, a strip of paper folded in half eight times' },
+    life       => { draw => \&life_canvas,       about => 'Conway\'s Game of Life: a glider gun firing gliders, with trails' },
     rule30     => { draw => \&rule30_canvas,     about => 'Wolfram\'s rule 30, one cell growing into chaos' },
     piwalk     => { draw => \&piwalk_canvas,     about => 'a walk steered by the first thousand digits of pi' },
     phase      => { draw => \&phase_canvas,      about => 'a phase portrait: zeros and poles of a complex function as color pinwheels' },
