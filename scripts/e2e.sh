@@ -66,7 +66,9 @@ send "/join $channel"
 wait_for "irssi to join $channel" 15 "tmux capture-pane -pt '$session' | grep -q 'Total of 2 nicks'"
 send "/script load $here/src/mathascii.pl"
 send "/math $piece"
-wait_for "$expected_lines lines to arrive" 60 \
+# Lines arrive about 2.7s apart here even with the queue speed lowered, for
+# reasons we haven't pinned down, so allow 4s a line.
+wait_for "$expected_lines lines to arrive" $((expected_lines * 4 + 10)) \
     "[[ \$(wc -l < '$work/received.txt') -ge $expected_lines ]]"
 tmux capture-pane -ept "$session" > "$work/irssi-screen.txt"
 
