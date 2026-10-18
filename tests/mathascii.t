@@ -316,6 +316,15 @@ subtest 'fern_points' => sub {
     is_deeply [ fern_points(500) ], [ @points[ 0 .. 499 ] ], 'the same every time';
 };
 
+subtest 'clifford_points' => sub {
+    my @points = clifford_points(5000);
+    is scalar @points, 5000, 'one point per step';
+    is_deeply [ grep { abs($_->[0]) > 2 || abs($_->[1]) > 1.7 } @points ], [],
+        'x stays within 1 + |c| and y within 1 + |d|, since sin and cos do';
+    my %distinct = map { sprintf('%.3f,%.3f', @$_) => 1 } @points;
+    ok keys(%distinct) > 3000, 'and it never settles down';
+};
+
 subtest 'spirograph_points' => sub {
     my $gap = sub { sqrt(($_[0][0] - $_[1][0])**2 + ($_[0][1] - $_[1][1])**2) };
     for ([ 8, 5, 5, 5 ], [ 9, 6, 4, 2 ], [ 10, 4, 3, 2 ]) {
@@ -645,7 +654,7 @@ subtest 'cmd_math with no piece lists the pieces' => sub {
     my $server = FakeServer->new;
     my $item   = FakeItem->new;
     cmd_math('', $server, $item);
-    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian buddhabrot burningship chladni collatz dragon fern harmonograph hilbert julia koch life logistic lorenz mandelbrot newton pascal phase piwalk rule30 seahorse spirograph sunflower timestable ulam zeta', 'CLIENTCRAP' ] ];
+    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian buddhabrot burningship chladni clifford collatz dragon fern harmonograph hilbert julia koch life logistic lorenz mandelbrot newton pascal phase piwalk rule30 seahorse spirograph sunflower timestable ulam zeta', 'CLIENTCRAP' ] ];
     is_deeply $server->{sent}, [], 'nothing was sent';
 };
 
@@ -674,6 +683,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'buddhabrot    the Buddhabrot: the paths of every point that escapes the Mandelbrot set',
             'burningship   the Burning Ship fractal, z^2 + c with the orbit folded',
             'chladni       sand on a ringing metal plate, gathered on the lines that stand still',
+            'clifford      a Clifford strange attractor, drawn like smoke',
             'collatz       the Collatz coral: every trip down to 1, bending left on even, right on odd',
             'dragon        the Heighway dragon, a strip of paper folded in half eight times',
             'fern          Barnsley\'s fern, grown from four random affine maps',
@@ -691,7 +701,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'piwalk        a walk steered by the first thousand digits of pi',
             'rule30        Wolfram\'s rule 30, one cell growing into chaos',
             'seahorse      a seahorse tail in Seahorse Valley, 600 times closer',
-            'spirograph    a spirograph: a gear rolling inside a ring, pen near its rim',
+            'spirograph    a spirograph: a gear rolling inside a ring, drawing loops',
             'sunflower     seeds placed by the golden angle, falling into Fibonacci spirals',
             'timestable    times tables drawn on a circle, where a cardioid and a nephroid appear',
             'ulam          the Ulam spiral, where the primes line up on diagonals',
@@ -786,7 +796,7 @@ my @usage = (
 subtest 'cmd_math refuses bad input' => sub {
     my $item = FakeItem->new;
     cmd_math('nope', FakeServer->new, $item);
-    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian buddhabrot burningship chladni collatz dragon fern harmonograph hilbert julia koch life logistic lorenz mandelbrot newton pascal phase piwalk rule30 seahorse spirograph sunflower timestable ulam zeta', 'CLIENTERROR' ] ],
+    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian buddhabrot burningship chladni clifford collatz dragon fern harmonograph hilbert julia koch life logistic lorenz mandelbrot newton pascal phase piwalk rule30 seahorse spirograph sunflower timestable ulam zeta', 'CLIENTERROR' ] ],
         'unknown piece';
 
     @printed = ();

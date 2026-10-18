@@ -679,6 +679,42 @@ sub dragon_path {
     return @path;
 }
 
+# A Clifford attractor: x -> sin(a y) + c cos(a x), y -> sin(b x) + d cos(b y).
+# The point never settles and never repeats, but it stays on a fine, folded
+# veil, and piling up enough points draws the veil like smoke. Returns
+# $count points [x, y], after letting it settle for a moment from (0, 0).
+my ($CLIFFORD_A, $CLIFFORD_B, $CLIFFORD_C, $CLIFFORD_D) = (-1.4, 1.6, 1, 0.7);
+
+sub clifford_points {
+    my ($count) = @_;
+    my ($x, $y) = (0, 0);
+    my @points;
+    for my $step (1 .. 100 + $count) {
+        ($x, $y) = (sin($CLIFFORD_A * $y) + $CLIFFORD_C * cos($CLIFFORD_A * $x), sin($CLIFFORD_B * $x) + $CLIFFORD_D * cos($CLIFFORD_B * $y));
+        push @points, [ $x, $y ] if $step > 100;
+    }
+    return @points;
+}
+
+# Colored by how often the point lands on each pixel, teal to white, with
+# the stops on palette colors (22, 34, 46, 70, 98) so blends don't go gray.
+my @CLIFFORD_GLOW = (
+    [ 0,    0,   71,  71 ],
+    [ 0.3,  0,   116, 116 ],
+    [ 0.6,  0,   181, 181 ],
+    [ 0.85, 109, 255, 255 ],
+    [ 1,    255, 255, 255 ],
+);
+
+sub clifford_canvas {
+    my %hits;
+    for my $point (clifford_points(150_000)) {
+        my ($row, $col) = @{ centered_pixel(@$point, 28) };
+        $hits{ POSIX::floor($row + 0.5) . ',' . POSIX::floor($col + 0.5) }++;
+    }
+    return density_canvas(\%hits, \@CLIFFORD_GLOW, 0.98, 0.5);
+}
+
 sub gcd {
     my ($a, $b) = @_;
     ($a, $b) = ($b, $a % $b) while $b;
@@ -1756,7 +1792,8 @@ our %PIECES = (
     ulam       => { draw => \&ulam_canvas,       about => 'the Ulam spiral, where the primes line up on diagonals' },
     burningship => { draw => \&burningship_canvas, about => 'the Burning Ship fractal, z^2 + c with the orbit folded' },
     dragon     => { draw => \&dragon_canvas,     about => 'the Heighway dragon, a strip of paper folded in half eight times' },
-    spirograph => { draw => \&spirograph_canvas, about => 'a spirograph: a gear rolling inside a ring, pen near its rim' },
+    spirograph => { draw => \&spirograph_canvas, about => 'a spirograph: a gear rolling inside a ring, drawing loops' },
+    clifford   => { draw => \&clifford_canvas,   about => 'a Clifford strange attractor, drawn like smoke' },
     life       => { draw => \&life_canvas,       about => 'Conway\'s Game of Life: a glider gun firing gliders, with trails' },
     rule30     => { draw => \&rule30_canvas,     about => 'Wolfram\'s rule 30, one cell growing into chaos' },
     piwalk     => { draw => \&piwalk_canvas,     about => 'a walk steered by the first thousand digits of pi' },
