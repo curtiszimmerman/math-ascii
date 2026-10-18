@@ -436,6 +436,74 @@ sub newton_canvas {
     return $canvas;
 }
 
+# Where 1, 2, 3, ... $count land when written in a square spiral: 1 in the
+# middle, 2 to its right, then turning counterclockwise, with y up. The walk
+# goes 1 step, turns, 1 step, turns, 2 steps, turns, 2 steps, and so on.
+sub ulam_spiral {
+    my ($count) = @_;
+    my @directions = ([ 1, 0 ], [ 0, 1 ], [ -1, 0 ], [ 0, -1 ]);
+    my ($x, $y, $direction, $run) = (0, 0, 0, 1);
+    my @spiral = ([ 0, 0 ]);
+    while (@spiral < $count) {
+        for (1 .. 2) {
+            for (1 .. $run) {
+                last if @spiral >= $count;
+                $x += $directions[$direction][0];
+                $y += $directions[$direction][1];
+                push @spiral, [ $x, $y ];
+            }
+            $direction = ($direction + 1) % 4;
+        }
+        $run++;
+    }
+    return @spiral;
+}
+
+# A sieve of Eratosthenes: element n is true when n is prime.
+sub primes_up_to {
+    my ($limit) = @_;
+    my @is_prime = (0, 0, (1) x ($limit - 1));
+    for my $n (2 .. int sqrt $limit) {
+        next if !$is_prime[$n];
+        for (my $multiple = $n * $n; $multiple <= $limit; $multiple += $n) {
+            $is_prime[$multiple] = 0;
+        }
+    }
+    return \@is_prime;
+}
+
+# The Ulam spiral lights up the primes among the first few thousand numbers.
+# They pile up along diagonals, which happens because some quadratics (the
+# diagonals) are far richer in primes than others, and nobody can fully
+# explain why. Each number is two pixels side by side so it draws square.
+# Primes are colored by size, pale gold in the middle out to violet.
+my @ULAM_HUES = (
+    [ 0,   255, 240, 150 ],
+    [ 0.3, 255, 180, 0 ],
+    [ 0.6, 255, 60,  80 ],
+    [ 1,   170, 60,  255 ],
+);
+
+sub ulam_canvas {
+    my ($cols, $rows) = (70, 48);
+    my $count    = $cols * $cols;
+    my $is_prime = primes_up_to($count);
+    my @palette  = gradient_palette(\@ULAM_HUES);
+    my @pixels   = map { [ ($BLACK) x (2 * $cols) ] } 1 .. $rows;
+
+    my @spiral = ulam_spiral($count);
+    for my $n (1 .. $count) {
+        my ($x, $y) = @{ $spiral[ $n - 1 ] };
+        my ($row, $col) = ($rows / 2 - $y, $cols / 2 + $x);
+        next if $row < 0 || $row >= $rows || $col < 0 || $col >= $cols;
+        my $color = $n == 1 ? 98
+            : $is_prime->[$n] ? nearest_color_in(\@palette, gradient_rgb(\@ULAM_HUES, sqrt($n / $count)))
+            :                   next;
+        @{ $pixels[$row] }[ 2 * $col, 2 * $col + 1 ] = ($color, $color);
+    }
+    return pixels_to_canvas(\@pixels);
+}
+
 # The Lorenz system, dx/dt = 10(y - x), dy/dt = x(28 - z) - y,
 # dz/dt = xy - 8z/3: a simplified model of convection that never settles and
 # never repeats, looping around two wings in an order nobody can predict.
@@ -694,6 +762,7 @@ our %PIECES = (
     julia      => { draw => \&julia_canvas,      about => 'the Julia set called Douady\'s rabbit, ears within ears' },
     lorenz     => { draw => \&lorenz_canvas,     about => 'the Lorenz attractor, the butterfly of chaos' },
     newton     => { draw => \&newton_canvas,     about => 'Newton\'s method on z^3 - 1, three basins with a fractal border' },
+    ulam       => { draw => \&ulam_canvas,       about => 'the Ulam spiral, where the primes line up on diagonals' },
 );
 
 sub piece_list { return join ' ', sort keys %PIECES }
