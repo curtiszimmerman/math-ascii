@@ -58,7 +58,7 @@ package FakeItem {
 
 package main;
 
-our ($ZETA_T_MAX, @ZETA_HUES, %PIECES, @QUADRANT, %RENDERED, $GOLDEN_ANGLE);
+our ($ZETA_T_MAX, @ZETA_HUES, %PIECES, @QUADRANT, %RENDERED, $GOLDEN_ANGLE, $GOSPER_GUN);
 my $script = "$FindBin::Bin/../src/mathascii.pl";
 do $script or die "could not load $script: " . ($@ || $!);
 
@@ -314,6 +314,70 @@ subtest 'fern_points' => sub {
     ok((grep { $_->[0] < -1.5 } @points) && (grep { $_->[0] > 1.5 } @points) && (grep { $_->[1] > 9 } @points),
         'and they reach out to both sides and up to the tip');
     is_deeply [ fern_points(500) ], [ @points[ 0 .. 499 ] ], 'the same every time';
+};
+
+subtest 'clifford_points' => sub {
+    my @points = clifford_points(5000);
+    is scalar @points, 5000, 'one point per step';
+    is_deeply [ grep { abs($_->[0]) > 2 || abs($_->[1]) > 1.7 } @points ], [],
+        'x stays within 1 + |c| and y within 1 + |d|, since sin and cos do';
+    my %distinct = map { sprintf('%.3f,%.3f', @$_) => 1 } @points;
+    ok keys(%distinct) > 3000, 'and it never settles down';
+};
+
+subtest 'spirograph_points' => sub {
+    my $gap = sub { sqrt(($_[0][0] - $_[1][0])**2 + ($_[0][1] - $_[1][1])**2) };
+    for ([ 8, 5, 5, 5 ], [ 9, 6, 4, 2 ], [ 10, 4, 3, 2 ]) {
+        my ($R, $r, $d, $trips) = @$_;
+        my @points = spirograph_points($R, $r, $d, 600);
+        ok $gap->(@points[ 0, -1 ]) < 1e-9, "R=$R r=$r closes after $trips trips round the ring";
+        my @early = grep { $gap->($points[0], $points[ $_ * 600 / $trips ]) < 1e-6 } 1 .. $trips - 1;
+        is_deeply \@early, [], 'and not before';
+    }
+};
+
+subtest 'life' => sub {
+    my $cells = sub { [ sort map { "@$_" } @_ ] };
+    my $board = sub { my %alive = map { ("$_->[0],$_->[1]" => 1) } @_; return \%alive };
+    my $listed = sub { [ sort map { join ' ', split /,/ } keys %{ $_[0] } ] };
+
+    is_deeply $cells->(rle_cells('bo$2bo$3o!')), $cells->([ 1, 0 ], [ 2, 1 ], [ 0, 2 ], [ 1, 2 ], [ 2, 2 ]), 'reads a glider in RLE';
+
+    my $blinker = $board->([ 0, 1 ], [ 1, 1 ], [ 2, 1 ]);
+    is_deeply $listed->(life_step($blinker)), $cells->([ 1, 0 ], [ 1, 1 ], [ 1, 2 ]), 'a blinker turns upright';
+    is_deeply $listed->(life_step(life_step($blinker))), $listed->($blinker), 'and back';
+
+    my $block = $board->([ 0, 0 ], [ 1, 0 ], [ 0, 1 ], [ 1, 1 ]);
+    is_deeply $listed->(life_step($block)), $listed->($block), 'a block never changes';
+
+    my $glider = $board->(rle_cells('bo$2bo$3o!'));
+    my $later  = $glider;
+    $later = life_step($later) for 1 .. 4;
+    is_deeply $listed->($later), $cells->(map { [ $_->[0] + 1, $_->[1] + 1 ] } rle_cells('bo$2bo$3o!')),
+        'a glider moves one cell diagonally every four generations';
+
+    my $gun = $board->(rle_cells($GOSPER_GUN));
+    is scalar keys %$gun, 36, 'the glider gun starts with 36 cells';
+    $gun = life_step($gun) for 1 .. 30;
+    is scalar keys %$gun, 41, 'and after 30 generations has fired one 5-cell glider';
+    $gun = life_step($gun) for 1 .. 30;
+    is scalar keys %$gun, 46, 'and another 30 later';
+};
+
+subtest 'automaton_rows' => sub {
+    my $show = sub { join '', map { $_ ? 1 : 0 } @{ $_[0] } };
+    my @rows = automaton_rows(30, 7, 3);
+    is_deeply [ map { $show->($_) } @rows ], [ '0001000', '0011100', '0110010' ],
+        'rule 30 from one cell, worked by hand: 1, 111, 11001';
+
+    # Rule 90 sets each cell to the XOR of its neighbors, which is Pascal's
+    # rule mod 2, so from one cell it draws the odd binomial coefficients.
+    @rows = automaton_rows(90, 81, 40);
+    my @wrong = grep {
+        my $n = $_;
+        grep { ($rows[$n][ 40 - $n + 2 * $_ ] ? 1 : 0) != (binomial_is_odd($n, $_) ? 1 : 0) } 0 .. $n;
+    } 0 .. 39;
+    is_deeply \@wrong, [], 'rule 90 is Pascal\'s triangle mod 2';
 };
 
 subtest 'pi_digits' => sub {
@@ -590,7 +654,7 @@ subtest 'cmd_math with no piece lists the pieces' => sub {
     my $server = FakeServer->new;
     my $item   = FakeItem->new;
     cmd_math('', $server, $item);
-    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian buddhabrot burningship chladni collatz dragon fern harmonograph hilbert julia koch logistic lorenz mandelbrot newton pascal phase piwalk seahorse sunflower timestable ulam zeta', 'CLIENTCRAP' ] ];
+    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian buddhabrot burningship chladni clifford collatz dragon fern harmonograph hilbert julia koch life logistic lorenz mandelbrot newton pascal phase piwalk rule30 seahorse spirograph sunflower timestable ulam zeta', 'CLIENTCRAP' ] ];
     is_deeply $server->{sent}, [], 'nothing was sent';
 };
 
@@ -619,6 +683,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'buddhabrot    the Buddhabrot: the paths of every point that escapes the Mandelbrot set',
             'burningship   the Burning Ship fractal, z^2 + c with the orbit folded',
             'chladni       sand on a ringing metal plate, gathered on the lines that stand still',
+            'clifford      a Clifford strange attractor, drawn like smoke',
             'collatz       the Collatz coral: every trip down to 1, bending left on even, right on odd',
             'dragon        the Heighway dragon, a strip of paper folded in half eight times',
             'fern          Barnsley\'s fern, grown from four random affine maps',
@@ -626,6 +691,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'hilbert       the Hilbert curve, one line through all 256 squares of a grid',
             'julia         the Julia set called Douady\'s rabbit, ears within ears',
             'koch          the Koch snowflake, an infinitely long edge around a finite area',
+            'life          Conway\'s Game of Life: a glider gun firing gliders, with trails',
             'logistic      the logistic map doubling its period over and over until it turns to chaos',
             'lorenz        the Lorenz attractor, the butterfly of chaos',
             'mandelbrot    the whole Mandelbrot set, glowing toward its edge',
@@ -633,7 +699,9 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'pascal        Pascal\'s triangle mod 2, which turns out to be Sierpinski\'s',
             'phase         a phase portrait: zeros and poles of a complex function as color pinwheels',
             'piwalk        a walk steered by the first thousand digits of pi',
+            'rule30        Wolfram\'s rule 30, one cell growing into chaos',
             'seahorse      a seahorse tail in Seahorse Valley, 600 times closer',
+            'spirograph    a spirograph: a gear rolling inside a ring, drawing loops',
             'sunflower     seeds placed by the golden angle, falling into Fibonacci spirals',
             'timestable    times tables drawn on a circle, where a cardioid and a nephroid appear',
             'ulam          the Ulam spiral, where the primes line up on diagonals',
@@ -728,7 +796,7 @@ my @usage = (
 subtest 'cmd_math refuses bad input' => sub {
     my $item = FakeItem->new;
     cmd_math('nope', FakeServer->new, $item);
-    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian buddhabrot burningship chladni collatz dragon fern harmonograph hilbert julia koch logistic lorenz mandelbrot newton pascal phase piwalk seahorse sunflower timestable ulam zeta', 'CLIENTERROR' ] ],
+    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian buddhabrot burningship chladni clifford collatz dragon fern harmonograph hilbert julia koch life logistic lorenz mandelbrot newton pascal phase piwalk rule30 seahorse spirograph sunflower timestable ulam zeta', 'CLIENTERROR' ] ],
         'unknown piece';
 
     @printed = ();

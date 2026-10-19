@@ -679,6 +679,199 @@ sub dragon_path {
     return @path;
 }
 
+# A Clifford attractor: x -> sin(a y) + c cos(a x), y -> sin(b x) + d cos(b y).
+# The point never settles and never repeats, but it stays on a fine, folded
+# veil, and piling up enough points draws the veil like smoke. Returns
+# $count points [x, y], after letting it settle for a moment from (0, 0).
+my ($CLIFFORD_A, $CLIFFORD_B, $CLIFFORD_C, $CLIFFORD_D) = (-1.4, 1.6, 1, 0.7);
+
+sub clifford_points {
+    my ($count) = @_;
+    my ($x, $y) = (0, 0);
+    my @points;
+    for my $step (1 .. 100 + $count) {
+        ($x, $y) = (sin($CLIFFORD_A * $y) + $CLIFFORD_C * cos($CLIFFORD_A * $x), sin($CLIFFORD_B * $x) + $CLIFFORD_D * cos($CLIFFORD_B * $y));
+        push @points, [ $x, $y ] if $step > 100;
+    }
+    return @points;
+}
+
+# Colored by how often the point lands on each pixel, teal to white, with
+# the stops on palette colors (22, 34, 46, 70, 98) so blends don't go gray.
+my @CLIFFORD_GLOW = (
+    [ 0,    0,   71,  71 ],
+    [ 0.3,  0,   116, 116 ],
+    [ 0.6,  0,   181, 181 ],
+    [ 0.85, 109, 255, 255 ],
+    [ 1,    255, 255, 255 ],
+);
+
+sub clifford_canvas {
+    my %hits;
+    for my $point (clifford_points(150_000)) {
+        my ($row, $col) = @{ centered_pixel(@$point, 28) };
+        $hits{ POSIX::floor($row + 0.5) . ',' . POSIX::floor($col + 0.5) }++;
+    }
+    return density_canvas(\%hits, \@CLIFFORD_GLOW, 0.98, 0.5);
+}
+
+sub gcd {
+    my ($a, $b) = @_;
+    ($a, $b) = ($b, $a % $b) while $b;
+    return $a;
+}
+
+# A spirograph (a hypotrochoid): a gear of radius $r rolls round inside a ring
+# of radius $R, and the pen sits $d from the gear's center. The gear is back
+# where it started, facing the same way, after r / gcd(R, r) trips round the
+# ring, so that's where the curve closes. Returns $steps + 1 points [x, y]
+# evenly along the whole closed curve.
+sub spirograph_points {
+    my ($R, $r, $d, $steps) = @_;
+    my $turns = 8 * atan2(1, 1) * $r / gcd($R, $r);
+    return map {
+        my $t = $turns * $_ / $steps;
+        [ ($R - $r) * cos($t) + $d * cos(($R - $r) / $r * $t), ($R - $r) * sin($t) - $d * sin(($R - $r) / $r * $t) ];
+    } 0 .. $steps;
+}
+
+# A gear of 5 in a ring of 8, drawn as a glowing line whose hue runs once
+# round the rainbow over the whole curve. With the pen right at the gear's rim
+# it's a sharp star; a little way in, the points open into loops.
+sub spirograph_canvas {
+    my ($R, $r, $d) = (8, 5, 3);
+    my @path   = map { centered_pixel(@$_, 46 / ($R - $r + $d)) } spirograph_points($R, $r, $d, 3000);
+    my @points = map { line_points(@path[ $_ - 1, $_ ], $_ / $#path) } 1 .. $#path;
+    my $canvas = glow_lines_canvas(\@points, \@ZETA_HUES, 0.5);
+    put_text($canvas, 0, 1, "ring $R, gear $r, pen $d",            97);
+    put_text($canvas, 1, 1, "closes after $r trips",              94);
+    return $canvas;
+}
+
+# Conway's Game of Life on an unbounded board, kept as a hash of the live
+# cells by "x,y". A live cell survives with two or three live neighbors, and
+# a dead one comes alive with exactly three.
+sub life_step {
+    my ($alive) = @_;
+    my %neighbors;
+    for my $cell (keys %$alive) {
+        my ($x, $y) = split /,/, $cell;
+        for my $dx (-1 .. 1) {
+            for my $dy (-1 .. 1) {
+                $neighbors{ ($x + $dx) . ',' . ($y + $dy) }++ if $dx || $dy;
+            }
+        }
+    }
+    return { map { ($_ => 1) } grep { $neighbors{$_} == 3 || ($neighbors{$_} == 2 && $alive->{$_}) } keys %neighbors };
+}
+
+# Reads a pattern in RLE, the run-length format Life patterns are shared in:
+# b is a dead cell, o a live one, $ ends a row, a number repeats what follows,
+# and ! ends the pattern. Returns the live cells as [x, y], y counting down.
+sub rle_cells {
+    my ($rle) = @_;
+    my ($x, $y) = (0, 0);
+    my @cells;
+    while ($rle =~ /(\d*)([bo\$!])/g) {
+        my ($run, $what) = ($1 || 1, $2);
+        last if $what eq '!';
+        if ($what eq '$') {
+            ($x, $y) = (0, $y + $run);
+        } else {
+            push @cells, map { [ $x + $_, $y ] } 0 .. $run - 1 if $what eq 'o';
+            $x += $run;
+        }
+    }
+    return @cells;
+}
+
+# Bill Gosper's glider gun, the first pattern found that grows forever: it
+# fires a glider every 30 generations.
+our $GOSPER_GUN = '24bo$22bobo$12b2o6b2o12b2o$11bo3bo4b2o12b2o$2o8bo5bo3b2o$2o8bo3bob2o4bobo$10bo5bo7bo$11bo3bo$12b2o!';
+
+# The gun after a few hundred generations, with a stream of gliders heading
+# off down the frame. Each cell is two pixels wide so it draws square, and
+# cells leave a fading trail for the last few generations they were alive,
+# so you can see which way everything is moving.
+my @LIFE_TRAIL = (
+    [ 0,   0,   0,   71 ],
+    [ 0.5, 0,   99,  181 ],
+    [ 0.8, 0,   255, 255 ],
+    [ 1,   255, 255, 255 ],
+);
+
+sub life_canvas {
+    my ($cols, $rows, $trail) = (70, 48, 8);
+    my $alive = { map { (($_->[0] + 2) . ',' . ($_->[1] + 2) => 1) } rle_cells($GOSPER_GUN) };
+    my %last_seen;
+    for my $generation (1 .. 240) {
+        $alive = life_step($alive);
+        $last_seen{$_} = $generation for keys %$alive;
+    }
+    my @palette = gradient_palette(\@LIFE_TRAIL);
+    my @pixels  = map {
+        my $y = $_;
+        [ map {
+            my $age = 240 - ($last_seen{"$_,$y"} // -1000);
+            ($age < $trail ? nearest_color_in(\@palette, gradient_rgb(\@LIFE_TRAIL, 1 - $age / $trail)) : $BLACK) x 2;
+        } 0 .. $cols - 1 ];
+    } 0 .. $rows - 1;
+    my $canvas = pixels_to_canvas(\@pixels);
+    put_text($canvas, 22, 1, "Gosper's glider gun:",         97);
+    put_text($canvas, 23, 1, 'a glider every 30 generations', 94);
+    return $canvas;
+}
+
+# An elementary cellular automaton: a row of cells, each on or off, where the
+# next row's cell is decided by the cell above it and that cell's two
+# neighbors. Those three make a number from 0 to 7, and that bit of the rule
+# number says whether the new cell is on. Starts from one cell in the middle
+# of a row $width wide, cells past the ends counting as off, and returns
+# $count rows as lists of 0s and 1s.
+sub automaton_rows {
+    my ($rule, $width, $count) = @_;
+    my @row = (0) x $width;
+    $row[ int($width / 2) ] = 1;
+    my @rows = ([@row]);
+    while (@rows < $count) {
+        @row = map {
+            my $pattern = 4 * ($_ > 0 ? $row[ $_ - 1 ] : 0) + 2 * $row[$_] + ($_ < $width - 1 ? $row[ $_ + 1 ] : 0);
+            ($rule >> $pattern) & 1;
+        } 0 .. $width - 1;
+        push @rows, [@row];
+    }
+    return @rows;
+}
+
+# Rule 30 from a single cell: one side settles into stripes and the other
+# never settles at all; Mathematica used its middle column as a random number
+# generator. Each cell is two pixels wide so it draws square. The pattern
+# grows a cell each way per row, so it's worked out on a wider strip than the
+# frame shows, so the edges don't bend it.
+my @RULE30_HUES = (
+    [ 0,   255, 255, 0 ],
+    [ 0.4, 255, 140, 0 ],
+    [ 0.7, 255, 0,   0 ],
+    [ 1,   255, 0,   255 ],
+);
+
+sub rule30_canvas {
+    my ($cols, $rows) = (70, 48);
+    my $margin  = $rows;
+    my @palette = gradient_palette(\@RULE30_HUES);
+    my @lines   = automaton_rows(30, $cols + 2 * $margin, $rows);
+    my @pixels  = map {
+        my $r     = $_;
+        my $color = nearest_color_in(\@palette, gradient_rgb(\@RULE30_HUES, $r / ($rows - 1)));
+        [ map { ($lines[$r][ $margin + $_ ] ? $color : $BLACK) x 2 } 0 .. $cols - 1 ];
+    } 0 .. $rows - 1;
+    my $canvas = pixels_to_canvas(\@pixels);
+    put_text($canvas, 0, 1, 'rule 30:', 97);
+    put_text($canvas, 1, 1, 'new = left XOR', 94);
+    put_text($canvas, 2, 1, '(middle OR right)', 94);
+    return $canvas;
+}
+
 # The first $count digits of pi, starting with the 3, by Rabinowitz and
 # Wagon's spigot: pi is written in a mixed-radix form whose "digits" are all
 # 2, and each round multiplies that by 10 and carries from right to left,
@@ -1599,6 +1792,10 @@ our %PIECES = (
     ulam       => { draw => \&ulam_canvas,       about => 'the Ulam spiral, where the primes line up on diagonals' },
     burningship => { draw => \&burningship_canvas, about => 'the Burning Ship fractal, z^2 + c with the orbit folded' },
     dragon     => { draw => \&dragon_canvas,     about => 'the Heighway dragon, a strip of paper folded in half eight times' },
+    spirograph => { draw => \&spirograph_canvas, about => 'a spirograph: a gear rolling inside a ring, drawing loops' },
+    clifford   => { draw => \&clifford_canvas,   about => 'a Clifford strange attractor, drawn like smoke' },
+    life       => { draw => \&life_canvas,       about => 'Conway\'s Game of Life: a glider gun firing gliders, with trails' },
+    rule30     => { draw => \&rule30_canvas,     about => 'Wolfram\'s rule 30, one cell growing into chaos' },
     piwalk     => { draw => \&piwalk_canvas,     about => 'a walk steered by the first thousand digits of pi' },
     phase      => { draw => \&phase_canvas,      about => 'a phase portrait: zeros and poles of a complex function as color pinwheels' },
     buddhabrot => { draw => \&buddhabrot_canvas, about => 'the Buddhabrot: the paths of every point that escapes the Mandelbrot set' },
