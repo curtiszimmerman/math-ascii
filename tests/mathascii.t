@@ -58,7 +58,7 @@ package FakeItem {
 
 package main;
 
-our ($ZETA_T_MAX, @ZETA_HUES, %PIECES, @QUADRANT, %RENDERED, $GOLDEN_ANGLE, $GOSPER_GUN);
+our ($ZETA_T_MAX, @ZETA_HUES, %PIECES, @QUADRANT, %RENDERED, $GOLDEN_ANGLE, $GOSPER_GUN, $SANDPILE_GRAINS, $SANDPILE_SIZE);
 my $script = "$FindBin::Bin/../src/mathascii.pl";
 do $script or die "could not load $script: " . ($@ || $!);
 
@@ -380,6 +380,29 @@ subtest 'automaton_rows' => sub {
     is_deeply \@wrong, [], 'rule 90 is Pascal\'s triangle mod 2';
 };
 
+subtest 'sandpile' => sub {
+    is_deeply sandpile(4, 3), [ [ 0, 1, 0 ], [ 1, 0, 1 ], [ 0, 1, 0 ] ], 'four grains topple once, one to each neighbor';
+    is_deeply sandpile(16, 5), [ [ 0, 0, 1, 0, 0 ], [ 0, 2, 1, 2, 0 ], [ 1, 1, 0, 1, 1 ], [ 0, 2, 1, 2, 0 ], [ 0, 0, 1, 0, 0 ] ],
+        'sixteen grains, worked by hand';
+
+    my $pile = sandpile(1000, 41);
+    is List::Util::sum(map { @$_ } @$pile), 1000, 'no grain is lost when the grid is big enough';
+    is_deeply [ grep { $_ > 3 } map { @$_ } @$pile ], [], 'every pile ends up with at most three grains';
+    is_deeply $pile, [ map { my $c = $_; [ map { $_->[$c] } @$pile ] } 0 .. 40 ], 'it is symmetric across the diagonal';
+    is_deeply $pile, [ reverse @$pile ], 'and top to bottom';
+
+    my $in_two_goes = sandpile(400, 41);
+    $in_two_goes->[20][20] += 600;
+    topple($in_two_goes);
+    is_deeply $in_two_goes, $pile, 'dropping the grains in two goes ends the same, since toppling order never matters';
+
+    my $edge = sandpile(1000, 9);
+    ok List::Util::sum(map { @$_ } @$edge) < 1000, 'on a small grid grains fall off the edge';
+
+    is List::Util::sum(map { @$_ } @{ sandpile($SANDPILE_GRAINS, $SANDPILE_SIZE) }), $SANDPILE_GRAINS,
+        'the piece\'s pile fits on its grid';
+};
+
 subtest 'pi_digits' => sub {
     my @digits = pi_digits(800);
     is scalar @digits, 800, 'as many digits as asked for';
@@ -654,7 +677,7 @@ subtest 'cmd_math with no piece lists the pieces' => sub {
     my $server = FakeServer->new;
     my $item   = FakeItem->new;
     cmd_math('', $server, $item);
-    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian buddhabrot burningship chladni clifford collatz dragon fern harmonograph hilbert julia koch life logistic lorenz mandelbrot newton pascal phase piwalk rule30 seahorse spirograph sunflower timestable ulam zeta', 'CLIENTCRAP' ] ];
+    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian buddhabrot burningship chladni clifford collatz dragon fern harmonograph hilbert julia koch life logistic lorenz mandelbrot newton pascal phase piwalk rule30 sandpile seahorse spirograph sunflower timestable ulam zeta', 'CLIENTCRAP' ] ];
     is_deeply $server->{sent}, [], 'nothing was sent';
 };
 
@@ -700,6 +723,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'phase         a phase portrait: zeros and poles of a complex function as color pinwheels',
             'piwalk        a walk steered by the first thousand digits of pi',
             'rule30        Wolfram\'s rule 30, one cell growing into chaos',
+            'sandpile      the Abelian sandpile: grains dropped on one square, toppling in fours',
             'seahorse      a seahorse tail in Seahorse Valley, 600 times closer',
             'spirograph    a spirograph: a gear rolling inside a ring, drawing loops',
             'sunflower     seeds placed by the golden angle, falling into Fibonacci spirals',
@@ -796,7 +820,7 @@ my @usage = (
 subtest 'cmd_math refuses bad input' => sub {
     my $item = FakeItem->new;
     cmd_math('nope', FakeServer->new, $item);
-    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian buddhabrot burningship chladni clifford collatz dragon fern harmonograph hilbert julia koch life logistic lorenz mandelbrot newton pascal phase piwalk rule30 seahorse spirograph sunflower timestable ulam zeta', 'CLIENTERROR' ] ],
+    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian buddhabrot burningship chladni clifford collatz dragon fern harmonograph hilbert julia koch life logistic lorenz mandelbrot newton pascal phase piwalk rule30 sandpile seahorse spirograph sunflower timestable ulam zeta', 'CLIENTERROR' ] ],
         'unknown piece';
 
     @printed = ();

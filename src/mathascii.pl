@@ -822,6 +822,66 @@ sub life_canvas {
     return $canvas;
 }
 
+# The Abelian sandpile: any square holding four or more grains topples,
+# sending one grain to each of its four neighbors, and grains pushed off the
+# edge are lost. Topples $grid (a square list of rows of grain counts) in
+# place until it settles. The order squares topple in never changes where it
+# settles, which is why it's called Abelian, so we topple a whole stack of
+# fours at a time.
+sub topple {
+    my ($grid) = @_;
+    my $size  = @$grid;
+    my @queue = grep { $grid->[ $_->[0] ][ $_->[1] ] > 3 } map { my $r = $_; map { [ $r, $_ ] } 0 .. $size - 1 } 0 .. $size - 1;
+    while (my $square = shift @queue) {
+        my ($r, $c) = @$square;
+        my $falls = int($grid->[$r][$c] / 4) or next;
+        $grid->[$r][$c] -= 4 * $falls;
+        for ([ $r - 1, $c ], [ $r + 1, $c ], [ $r, $c - 1 ], [ $r, $c + 1 ]) {
+            my ($nr, $nc) = @$_;
+            next if $nr < 0 || $nc < 0 || $nr >= $size || $nc >= $size;
+            push @queue, [ $nr, $nc ] if $grid->[$nr][$nc] < 4 && $grid->[$nr][$nc] + $falls > 3;
+            $grid->[$nr][$nc] += $falls;
+        }
+    }
+    return $grid;
+}
+
+# $grains dropped on the middle of a $size by $size grid, once it settles.
+sub sandpile {
+    my ($grains, $size) = @_;
+    my @grid = map { [ (0) x $size ] } 1 .. $size;
+    $grid[ int($size / 2) ][ int($size / 2) ] = $grains;
+    return topple(\@grid);
+}
+
+# Every square of the settled pile colored by how many grains it holds, which
+# draws a pattern of nested triangles and stripes nobody has fully explained.
+# Each square is two pixels wide so it draws square, and squares no grain
+# ever reached stay black. The grid has a middle square, so it's one row
+# short of the frame, and the pile is small enough that no grain falls off.
+my @SANDPILE_COLORS = (24, 47, 58, 54);
+our ($SANDPILE_GRAINS, $SANDPILE_SIZE) = (3500, 47);
+
+sub sandpile_canvas {
+    my $pile   = sandpile($SANDPILE_GRAINS, $SANDPILE_SIZE);
+    my $margin = (70 - $SANDPILE_SIZE + 1) / 2;
+    my @pixels = map {
+        my $row     = $pile->[$_];
+        my @reached = grep { $row->[$_] } 0 .. $SANDPILE_SIZE - 1;
+        [ map {
+            my $c = $_ - $margin;
+            (@reached && $c >= $reached[0] && $c <= $reached[-1] ? $SANDPILE_COLORS[ $row->[$c] ] : $BLACK) x 2;
+        } 0 .. 69 ];
+    } 0 .. $SANDPILE_SIZE - 1;
+    push @pixels, [ ($BLACK) x 140 ];
+    my $canvas = pixels_to_canvas(\@pixels);
+    put_text($canvas, 0,  1, "$SANDPILE_GRAINS grains of sand", 97);
+    put_text($canvas, 1,  1, 'dropped on one square',    94);
+    put_text($canvas, 22, 1, 'four in a pile topple',     94);
+    put_text($canvas, 23, 1, 'one to each neighbor',      94);
+    return $canvas;
+}
+
 # An elementary cellular automaton: a row of cells, each on or off, where the
 # next row's cell is decided by the cell above it and that cell's two
 # neighbors. Those three make a number from 0 to 7, and that bit of the rule
@@ -1796,6 +1856,7 @@ our %PIECES = (
     clifford   => { draw => \&clifford_canvas,   about => 'a Clifford strange attractor, drawn like smoke' },
     life       => { draw => \&life_canvas,       about => 'Conway\'s Game of Life: a glider gun firing gliders, with trails' },
     rule30     => { draw => \&rule30_canvas,     about => 'Wolfram\'s rule 30, one cell growing into chaos' },
+    sandpile   => { draw => \&sandpile_canvas,   about => 'the Abelian sandpile: grains dropped on one square, toppling in fours' },
     piwalk     => { draw => \&piwalk_canvas,     about => 'a walk steered by the first thousand digits of pi' },
     phase      => { draw => \&phase_canvas,      about => 'a phase portrait: zeros and poles of a complex function as color pinwheels' },
     buddhabrot => { draw => \&buddhabrot_canvas, about => 'the Buddhabrot: the paths of every point that escapes the Mandelbrot set' },
