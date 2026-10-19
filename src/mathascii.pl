@@ -294,22 +294,34 @@ sub glow_rgb {
 # pixel near the curve we find how close the curve comes; where the curve
 # crosses itself, the nearer strand wins. A width below 1 draws a thinner line
 # with a shorter glow, for curves whose strands run close together.
+#
+# Points of a curve in 3D can carry a fourth number, how near the viewer they
+# are. A strand clearly nearer than another takes over every pixel its glow
+# reaches, so where it crosses in front, the one behind breaks off with a dark
+# gap on either side, the way knots are drawn.
+my $GLOW_DEPTH_MARGIN = 0.5;
+
 sub draw_glow_curve {
     my ($rgb, $points, $hues, $width) = @_;
     $width //= 1;
     my $reach = $GLOW_REACH * $width;
     my ($rows, $cols) = (scalar @$rgb, scalar @{ $rgb->[0] });
-    my (%distance, %position_at);
+    my (%distance, %position_at, %depth_at);
     for my $point (@$points) {
-        my ($row, $col, $position) = @$point;
+        my ($row, $col, $position, $depth) = @$point;
+        $depth //= 0;
         for my $r (POSIX::ceil($row - $reach / 2) .. POSIX::floor($row + $reach / 2)) {
             next if $r < 0 || $r >= $rows;
             for my $c (POSIX::ceil($col - $reach) .. POSIX::floor($col + $reach)) {
                 next if $c < 0 || $c >= $cols;
                 my $d = sqrt(($c - $col)**2 + (2 * ($r - $row))**2) / $width;
-                next if exists $distance{"$r,$c"} && $distance{"$r,$c"} <= $d;
+                if (exists $distance{"$r,$c"}) {
+                    my $nearer = $depth - $depth_at{"$r,$c"};
+                    next if $nearer < -$GLOW_DEPTH_MARGIN || ($nearer <= $GLOW_DEPTH_MARGIN && $distance{"$r,$c"} <= $d);
+                }
                 $distance{"$r,$c"}    = $d;
                 $position_at{"$r,$c"} = $position;
+                $depth_at{"$r,$c"}    = $depth;
             }
         }
     }
@@ -1055,6 +1067,228 @@ sub ford_canvas {
     put_text($canvas, 1, 1, 'one on every fraction p/q', 94);
     put_text($canvas, 2, 1, 'radius 1/(2q^2)',           94);
     put_text($canvas, 3, 1, 'neighbors always touch',    94);
+    return $canvas;
+}
+
+# Fibonacci squares spiraling out: start with a unit square, then keep
+# adding a square on the next side round (right, top, left, bottom, ...) of
+# the rectangle so far, as long as that side. Each square holds a quarter
+# circle centered on one of its corners, and together they make the golden
+# spiral. Returns $count squares as {x, y, size} (bottom left corner, y up)
+# with the quarter circle's center {cx, cy} and its angles {from, to}.
+sub golden_squares {
+    my ($count) = @_;
+    my $quarter = 2 * atan2(1, 1);
+    my ($left, $right, $bottom, $top) = (0, 1, 0, 1);
+    my @squares = ({ x => 0, y => 0, size => 1 });
+    for my $i (1 .. $count - 1) {
+        my $side = ($i - 1) % 4;
+        my $size = $side % 2 ? $right - $left : $top - $bottom;
+        my ($x, $y) = $side == 0 ? ($right, $bottom) : $side == 1 ? ($left, $top) : $side == 2 ? ($left - $size, $bottom) : ($left, $bottom - $size);
+        push @squares, { x => $x, y => $y, size => $size };
+        ($left, $right, $bottom, $top) = (List::Util::min($left, $x), List::Util::max($right, $x + $size), List::Util::min($bottom, $y), List::Util::max($top, $y + $size));
+    }
+    # The first square counts as added on the bottom. A square added on the
+    # right turns about its top left corner, on the top about its bottom left,
+    # and so on round.
+    for my $i (0 .. $#squares) {
+        my $s    = $squares[$i];
+        my $side = ($i + 3) % 4;
+        my @corner = @{ ([ 0, 1 ], [ 0, 0 ], [ 1, 0 ], [ 1, 1 ])[$side] };
+        @$s{qw(cx cy from to)} = ($s->{x} + $corner[0] * $s->{size}, $s->{y} + $corner[1] * $s->{size}, ($side - 1) * $quarter, $side * $quarter);
+    }
+    return @squares;
+}
+
+# The squares in deepening shades with the spiral glowing gold across them.
+# Ten squares make an 89 wide by 55 tall rectangle, which just fits.
+my @GOLDEN_SHADES = (18, 17, 16, 27, 26, 25, 24, 23, 22, 35);
+my @GOLDEN_GLOW   = ([ 0, 255, 140, 0 ], [ 0.5, 255, 255, 0 ], [ 1, 255, 255, 255 ]);
+
+sub golden_canvas {
+    my @squares = golden_squares(10);
+    my $scale   = 1.55;
+    my $left    = List::Util::min(map { $_->{x} } @squares);
+    my $bottom  = List::Util::min(map { $_->{y} } @squares);
+    my $pixel   = sub { [ 45 - ($_[1] - $bottom) * $scale / 2, 0.5 + ($_[0] - $left) * $scale ] };
+    my @rgb = map { [ map { [ 0, 0, 0 ] } 1 .. 140 ] } 1 .. 48;
+    for my $i (0 .. $#squares) {
+        my $s = $squares[$i];
+        my ($top_left, $bottom_right) = ($pixel->($s->{x}, $s->{y} + $s->{size}), $pixel->($s->{x} + $s->{size}, $s->{y}));
+        for my $r (POSIX::ceil($top_left->[0]) .. POSIX::floor($bottom_right->[0])) {
+            for my $c (POSIX::ceil($top_left->[1]) .. POSIX::floor($bottom_right->[1])) {
+                next if $r < 0 || $r > 47 || $c < 0 || $c > 139;
+                $rgb[$r][$c] = [ rgb($GOLDEN_SHADES[$i]) ];
+            }
+        }
+    }
+    for my $s (@squares) {
+        my @corners = map { $pixel->(@$_) } [ $s->{x}, $s->{y} ], [ $s->{x} + $s->{size}, $s->{y} ], [ $s->{x} + $s->{size}, $s->{y} + $s->{size} ], [ $s->{x}, $s->{y} + $s->{size} ];
+        for my $edge (map { [ line_points(@corners[ $_ - 1, $_ ], 0) ] } 0 .. 3) {
+            for my $point (@$edge) {
+                my ($r, $c) = map { POSIX::floor($_ + 0.5) } @$point[ 0, 1 ];
+                $rgb[$r][$c] = [ 0, 0, 0 ] if $r >= 0 && $r <= 47 && $c >= 0 && $c <= 139;
+            }
+        }
+    }
+    my @points;
+    for my $i (0 .. $#squares) {
+        my $s = $squares[$i];
+        my @arc = map {
+            my $angle = $s->{from} + ($s->{to} - $s->{from}) * $_ / 60;
+            $pixel->($s->{cx} + $s->{size} * cos($angle), $s->{cy} + $s->{size} * sin($angle));
+        } 0 .. 60;
+        push @points, map { line_points(@arc[ $_ - 1, $_ ], $i / $#squares) } 1 .. $#arc;
+    }
+    draw_glow_curve(\@rgb, \@points, \@GOLDEN_GLOW, 0.5);
+    my @palette = (@GOLDEN_SHADES, gradient_palette(\@GOLDEN_GLOW), $BLACK);
+    my $canvas  = pixels_to_canvas([ map { [ map { nearest_color_in(\@palette, @$_) } @$_ ] } @rgb ]);
+    put_text($canvas, 4, 30, 'the golden spiral',                 97);
+    put_text($canvas, 5, 30, 'squares 1 1 2 3 5 8 13 21 34 55',   94);
+    put_text($canvas, 6, 30, '55/34 = 1.6176..., phi = 1.6180...', 94);
+    return $canvas;
+}
+
+# A Penrose tiling of thin and thick rhombs, built the way Jeff Preshing
+# does it: each rhomb is two triangles [kind, A, B, C], A at the apex, kind
+# 0 for half a thin rhomb (a golden triangle) and 1 for half a thick one (a
+# golden gnomon). Start with a wheel of ten thin halves round the origin,
+# then split every triangle into smaller ones of the same two shapes, $level
+# times. Points are [x, y].
+my $PHI = (1 + sqrt 5) / 2;
+
+sub penrose_triangles {
+    my ($level) = @_;
+    my $between = sub { my ($from, $to, $f) = @_; [ map { $from->[$_] + $f * ($to->[$_] - $from->[$_]) } 0, 1 ] };
+    my @triangles = map {
+        my ($b, $c) = map { [ cos($_ * atan2(1, 1) / 2.5), sin($_ * atan2(1, 1) / 2.5) ] } 2 * $_ - 1, 2 * $_ + 1;
+        ($b, $c) = ($c, $b) if $_ % 2 == 0;
+        [ 0, [ 0, 0 ], $b, $c ];
+    } 0 .. 9;
+    for (1 .. $level) {
+        @triangles = map {
+            my ($kind, $a, $b, $c) = @$_;
+            if ($kind == 0) {
+                my $p = $between->($a, $b, 1 / $PHI);
+                ([ 0, $c, $p, $b ], [ 1, $p, $c, $a ]);
+            } else {
+                my ($q, $r) = ($between->($b, $a, 1 / $PHI), $between->($b, $c, 1 / $PHI));
+                ([ 1, $r, $c, $a ], [ 1, $q, $r, $b ], [ 0, $r, $q, $a ]);
+            }
+        } @triangles;
+    }
+    return @triangles;
+}
+
+# The tiling filled in, thick rhombs warm and thin ones cool, each getting
+# lighter toward the middle, with dark edges between rhombs. The edge from
+# B to C is the seam between a rhomb's two halves, so it's left undrawn.
+my @PENROSE_THICK = ([ 0, 255, 140, 0 ], [ 1, 116, 0, 0 ]);
+my @PENROSE_THIN  = ([ 0, 0, 255, 255 ], [ 1, 0, 0, 116 ]);
+
+sub penrose_canvas {
+    my $scale  = 100;
+    my @rgb    = map { [ map { [ 0, 0, 0 ] } 1 .. 140 ] } 1 .. 48;
+    my $pixel  = sub { centered_pixel(@{ $_[0] }, $scale) };
+    my $inside = sub {
+        my ($point, @corners) = @_;
+        my @sides = map {
+            my ($from, $to) = @corners[ $_, ($_ + 1) % 3 ];
+            ($to->[1] - $from->[1]) * ($point->[0] - $from->[0]) - ($to->[0] - $from->[0]) * ($point->[1] - $from->[1]);
+        } 0 .. 2;
+        return !(grep { $_ < 0 } @sides) || !(grep { $_ > 0 } @sides);
+    };
+    my @edges;
+    for my $triangle (penrose_triangles(4)) {
+        my ($kind, @corners) = @$triangle;
+        my @on_screen = map { $pixel->($_) } @corners;
+        my $middle    = [ map { my $i = $_; List::Util::sum(map { $_->[$i] } @corners) / 3 } 0, 1 ];
+        my @color     = gradient_rgb($kind ? \@PENROSE_THICK : \@PENROSE_THIN, sqrt($middle->[0]**2 + $middle->[1]**2));
+        for my $r (POSIX::ceil(List::Util::min(map { $_->[0] } @on_screen)) .. POSIX::floor(List::Util::max(map { $_->[0] } @on_screen))) {
+            next if $r < 0 || $r > 47;
+            for my $c (POSIX::ceil(List::Util::min(map { $_->[1] } @on_screen)) .. POSIX::floor(List::Util::max(map { $_->[1] } @on_screen))) {
+                next if $c < 0 || $c > 139;
+                $rgb[$r][$c] = [@color] if $inside->([ $r, $c ], @on_screen);
+            }
+        }
+        push @edges, map { line_points(@on_screen[ @$_ ], 0) } [ 2, 0 ], [ 0, 1 ];
+    }
+    for my $point (@edges) {
+        my ($r, $c) = map { POSIX::floor($_ + 0.5) } @$point[ 0, 1 ];
+        $rgb[$r][$c] = [ 0, 0, 0 ] if $r >= 0 && $r <= 47 && $c >= 0 && $c <= 139;
+    }
+    my @palette = (gradient_palette(\@PENROSE_THICK), gradient_palette(\@PENROSE_THIN), $BLACK);
+    my $canvas  = pixels_to_canvas([ map { [ map { nearest_color_in(\@palette, @$_) } @$_ ] } @rgb ]);
+    put_text($canvas, 23, 1, 'Penrose tiling: never repeats, thick:thin = phi', 97);
+    return $canvas;
+}
+
+# The (p, q) torus knot: a line wound round a doughnut, p times round the
+# hole and q times round the tube, closing up after one trip. When p and q
+# share no factor it's a single knotted loop. The tube has radius 1 and runs
+# round a circle of radius 2. Returns $steps + 1 points [x, y, z] along it.
+sub torus_knot_points {
+    my ($p, $q, $steps) = @_;
+    return map {
+        my $t = 8 * atan2(1, 1) * $_ / $steps;
+        my $out = 2 + cos($q * $t);
+        [ $out * cos($p * $t), $out * sin($p * $t), sin($q * $t) ];
+    } 0 .. $steps;
+}
+
+# The (2, 5) torus knot, tipped toward the viewer, its hue running once
+# along the whole loop. Strands in front cut the ones behind, so every
+# crossing shows which way it goes.
+sub knot_canvas {
+    my ($p, $q, $tilt, $steps) = (2, 5, 0.45, 8000);
+    my @knot   = torus_knot_points($p, $q, $steps);
+    my @points = map {
+        my ($x, $y, $z) = @{ $knot[$_] };
+        my ($up, $near) = ($y * cos($tilt) - $z * sin($tilt), $y * sin($tilt) + $z * cos($tilt));
+        [ @{ centered_pixel($x, $up, 15) }, $_ / $steps, $near ];
+    } 0 .. $steps;
+    my $canvas = glow_lines_canvas(\@points, \@ZETA_HUES, 0.8);
+    put_text($canvas, 0, 1, "the ($p,$q) torus knot:",   97);
+    put_text($canvas, 1, 1, "$p times round the hole,",  94);
+    put_text($canvas, 2, 1, "$q times round the tube",   94);
+    return $canvas;
+}
+
+# The first $terms terms of the Fourier series of a square wave that's 1
+# from 0 to pi and -1 from pi to 2 pi: (4/pi) (sin x + sin 3x / 3 + sin 5x / 5 + ...).
+sub square_wave_sum {
+    my ($x, $terms) = @_;
+    my $sum = 0;
+    $sum += sin((2 * $_ - 1) * $x) / (2 * $_ - 1) for 1 .. $terms;
+    return $sum / atan2(1, 1);
+}
+
+# Sums with more and more terms drawn over each other, each in its own hue,
+# closing in on the square wave from -pi to pi. The corners never quite come
+# right: the overshoot next to each jump gets narrower but never lower. That's
+# the Gibbs phenomenon.
+my @FOURIER_TERMS = (1, 3, 10, 40);
+my @FOURIER_HUES  = (
+    [ 0,     165, 0,   255 ],
+    [ 1 / 3, 0,   255, 255 ],
+    [ 2 / 3, 255, 255, 0 ],
+    [ 1,     255, 255, 255 ],
+);
+
+sub fourier_canvas {
+    my $pi = 4 * atan2(1, 1);
+    my @points;
+    for my $i (0 .. $#FOURIER_TERMS) {
+        my @path = map {
+            my $x = -$pi + 2 * $pi * $_ / 1400;
+            [ 23.5 - 16 * square_wave_sum($x, $FOURIER_TERMS[$i]), 69.5 + 68 * $x / $pi ];
+        } 0 .. 1400;
+        push @points, map { line_points(@path[ $_ - 1, $_ ], $i / $#FOURIER_TERMS) } 1 .. $#path;
+    }
+    my $canvas = glow_lines_canvas(\@points, \@FOURIER_HUES, 0.5);
+    put_text($canvas, 0,  1, 'square wave = (4/pi)(sin x + sin 3x/3 + sin 5x/5 + ...)', 97);
+    put_text($canvas, 1,  1, '1, 3, 10 and 40 terms',                                  94);
+    put_text($canvas, 23, 1, 'the corners overshoot by 9% however many terms (Gibbs)', 94);
     return $canvas;
 }
 
@@ -2033,6 +2267,10 @@ our %PIECES = (
     life       => { draw => \&life_canvas,       about => 'Conway\'s Game of Life: a glider gun firing gliders, with trails' },
     rule30     => { draw => \&rule30_canvas,     about => 'Wolfram\'s rule 30, one cell growing into chaos' },
     ford       => { draw => \&ford_canvas,       about => 'Ford circles: a circle on every fraction, and neighbors always touch' },
+    fourier    => { draw => \&fourier_canvas,    about => 'a square wave built from sine waves, overshooting at every corner' },
+    penrose    => { draw => \&penrose_canvas,    about => 'a Penrose tiling: two rhombs covering the plane without ever repeating' },
+    knot       => { draw => \&knot_canvas,      about => 'a torus knot: a line wound round a doughnut, twice one way and five times the other' },
+    golden     => { draw => \&golden_canvas,    about => 'the golden spiral, drawn through squares whose sides are the Fibonacci numbers' },
     langton    => { draw => \&langton_canvas,    about => 'Langton\'s ant: ten thousand steps of mess, then out of nowhere a highway' },
     lyapunov   => { draw => \&lyapunov_canvas,   about => 'a Lyapunov fractal: where a logistic map flipping between two rates settles or turns to chaos' },
     sandpile   => { draw => \&sandpile_canvas,   about => 'the Abelian sandpile: grains dropped on one square, toppling in fours' },

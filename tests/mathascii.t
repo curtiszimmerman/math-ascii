@@ -160,6 +160,16 @@ subtest 'draw_glow_curve' => sub {
     draw_glow_curve(\@thin, [ [ 5, 5, 0 ] ], \@hues, 0.4);
     is_deeply $thin[5][5], [ 255, 0, 0 ], 'a thinner line still has its hue at the center';
     is_deeply $thin[5][7], [ 0, 0, 0 ], 'but stops sooner';
+
+    # A blue strand passing in front of a red one: the fourth number is how
+    # near the viewer each point is.
+    my @deep = map { [ map { [ 0, 0, 0 ] } 1 .. 20 ] } 1 .. 10;
+    draw_glow_curve(\@deep, [ [ 5, 5, 0, 0 ], [ 5, 7, 1, 1 ] ], \@hues);
+    my @alone = map { [ map { [ 0, 0, 0 ] } 1 .. 20 ] } 1 .. 10;
+    draw_glow_curve(\@alone, [ [ 5, 5, 0 ] ], \@hues);
+    ok $deep[5][5][0] == 0 && $deep[5][5][2] > 0, 'a strand in front covers the one behind with its fading glow';
+    is_deeply $deep[5][7], [ 0, 0, 255 ], 'and is drawn in full';
+    is_deeply $deep[5][2], $alone[5][2], 'the strand behind shows as usual beyond the reach of the one in front';
 };
 
 subtest 'lorenz_points' => sub {
@@ -456,6 +466,90 @@ subtest 'ford circles' => sub {
     is_deeply ford_circle(1, 2), [ 0.5, 0.125, 0.125 ], 'each one sits on the line, radius 1/(2q^2)';
 };
 
+subtest 'square_wave_sum' => sub {
+    my $pi = 4 * atan2(1, 1);
+    is square_wave_sum(0, 50), 0, 'zero where the wave jumps';
+    ok abs(square_wave_sum(1, 7) + square_wave_sum(-1, 7)) < 1e-12, 'odd, like the wave';
+    ok abs(square_wave_sum($pi / 2, 1) - 4 / $pi) < 1e-12, 'one term is (4/pi) sin x';
+    ok abs(square_wave_sum($pi / 2, 2000) - 1) < 1e-3, 'many terms add up to the wave: 1 - 1/3 + 1/5 - ... = pi/4';
+    ok abs(square_wave_sum(2.5, 2000) - 1) < 1e-3, 'anywhere between the jumps';
+
+    # Gibbs: next to the jump the sums overshoot by about 9% of the jump, however many terms.
+    for my $terms (50, 200) {
+        my $peak = List::Util::max(map { square_wave_sum($_ * $pi / (2000 * $terms), $terms) } 1 .. 4000);
+        ok abs($peak - 1.17898) < 0.001, "$terms terms still overshoot to 1.179, (2/pi) Si(pi)";
+    }
+};
+
+subtest 'golden_squares' => sub {
+    my @squares = golden_squares(10);
+    is join(' ', map { $_->{size} } @squares), '1 1 2 3 5 8 13 21 34 55', 'each square is the size of the side it sits on: Fibonacci';
+    my @overlapping;
+    for my $i (0 .. $#squares) {
+        for my $j ($i + 1 .. $#squares) {
+            my ($s, $t) = @squares[ $i, $j ];
+            push @overlapping, "$i,$j"
+                if $s->{x} < $t->{x} + $t->{size} && $t->{x} < $s->{x} + $s->{size} && $s->{y} < $t->{y} + $t->{size} && $t->{y} < $s->{y} + $s->{size};
+        }
+    }
+    is_deeply \@overlapping, [], 'no two squares overlap';
+    my $width  = List::Util::max(map { $_->{x} + $_->{size} } @squares) - List::Util::min(map { $_->{x} } @squares);
+    my $height = List::Util::max(map { $_->{y} + $_->{size} } @squares) - List::Util::min(map { $_->{y} } @squares);
+    is_deeply [ sort { $a <=> $b } $width, $height ], [ 55, 89 ], 'together they fill a 55 by 89 rectangle';
+    is List::Util::sum(map { $_->{size}**2 } @squares), 55 * 89, 'with no gaps';
+
+    my $end = sub { my ($s, $angle) = @_; [ map { sprintf '%.9f', $_ } $s->{cx} + $s->{size} * cos($angle), $s->{cy} + $s->{size} * sin($angle) ] };
+    my @breaks = grep {
+        my ($s, $t) = @squares[ $_, $_ + 1 ];
+        "@{ $end->($s, $s->{to}) }" ne "@{ $end->($t, $t->{from}) }";
+    } 0 .. $#squares - 1;
+    is_deeply \@breaks, [], 'the quarter circles join into one spiral';
+};
+
+subtest 'torus_knot_points' => sub {
+    my $pi    = 4 * atan2(1, 1);
+    my $turns = sub {
+        my ($angles) = @_;
+        my $total = 0;
+        for my $i (1 .. $#$angles) {
+            my $step = $angles->[$i] - $angles->[ $i - 1 ];
+            $step -= 2 * $pi * POSIX::floor(($step + $pi) / (2 * $pi));
+            $total += $step;
+        }
+        return sprintf '%.6f', $total / (2 * $pi);
+    };
+    for ([ 2, 3 ], [ 3, 7 ], [ 5, 2 ]) {
+        my ($p, $q) = @$_;
+        my @points = torus_knot_points($p, $q, 2000);
+        my ($first, $last) = @points[ 0, -1 ];
+        ok abs($first->[0] - $last->[0]) + abs($first->[1] - $last->[1]) + abs($first->[2] - $last->[2]) < 1e-9, "the ($p,$q) knot closes";
+        is $turns->([ map { atan2($_->[1], $_->[0]) } @points ]), sprintf('%.6f', $p), "going $p times round the hole";
+        is $turns->([ map { atan2($_->[2], sqrt($_->[0]**2 + $_->[1]**2) - 2) } @points ]), sprintf('%.6f', $q), "and $q times round the tube";
+    }
+};
+
+subtest 'penrose_triangles' => sub {
+    my $phi = (1 + sqrt 5) / 2;
+    my @counts;
+    for my $level (0 .. 5) {
+        my @triangles = penrose_triangles($level);
+        push @counts, join '/', scalar(grep { $_->[0] == 0 } @triangles), scalar(grep { $_->[0] == 1 } @triangles);
+    }
+    is "@counts", '10/0 10/10 20/30 50/80 130/210 340/550', 'each step splits a thin piece in two and a thick one in three';
+
+    my @triangles = penrose_triangles(5);
+    my $length = sub { sqrt(($_[0][0] - $_[1][0])**2 + ($_[0][1] - $_[1][1])**2) };
+    my $area   = sub { my ($a, $b, $c) = @_; abs(($b->[0] - $a->[0]) * ($c->[1] - $a->[1]) - ($c->[0] - $a->[0]) * ($b->[1] - $a->[1])) / 2 };
+    my @wrong = grep {
+        my ($color, $a, $b, $c) = @$_;
+        my ($ab, $ac, $bc) = ($length->($a, $b), $length->($a, $c), $length->($b, $c));
+        abs($ab - $ac) > 1e-9 || abs($bc / $ab - ($color ? $phi : 1 / $phi)) > 1e-9;
+    } @triangles;
+    is_deeply \@wrong, [], 'thin pieces are golden triangles and thick ones golden gnomons';
+    ok abs(List::Util::sum(map { $area->(@$_[ 1 .. 3 ]) } @triangles) - List::Util::sum(map { $area->(@$_[ 1 .. 3 ]) } penrose_triangles(0))) < 1e-9,
+        'and they still cover exactly the starting wheel';
+};
+
 subtest 'pi_digits' => sub {
     my @digits = pi_digits(800);
     is scalar @digits, 800, 'as many digits as asked for';
@@ -730,7 +824,7 @@ subtest 'cmd_math with no piece lists the pieces' => sub {
     my $server = FakeServer->new;
     my $item   = FakeItem->new;
     cmd_math('', $server, $item);
-    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian buddhabrot burningship chladni clifford collatz dragon fern ford harmonograph hilbert julia koch langton life logistic lorenz lyapunov mandelbrot newton pascal phase piwalk rule30 sandpile seahorse spirograph sunflower timestable ulam zeta', 'CLIENTCRAP' ] ];
+    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian buddhabrot burningship chladni clifford collatz dragon fern ford fourier golden harmonograph hilbert julia knot koch langton life logistic lorenz lyapunov mandelbrot newton pascal penrose phase piwalk rule30 sandpile seahorse spirograph sunflower timestable ulam zeta', 'CLIENTCRAP' ] ];
     is_deeply $server->{sent}, [], 'nothing was sent';
 };
 
@@ -764,9 +858,12 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'dragon        the Heighway dragon, a strip of paper folded in half eight times',
             'fern          Barnsley\'s fern, grown from four random affine maps',
             'ford          Ford circles: a circle on every fraction, and neighbors always touch',
+            'fourier       a square wave built from sine waves, overshooting at every corner',
+            'golden        the golden spiral, drawn through squares whose sides are the Fibonacci numbers',
             'harmonograph  two damped pendulums drawing on paper, spiraling in as they tire',
             'hilbert       the Hilbert curve, one line through all 256 squares of a grid',
             'julia         the Julia set called Douady\'s rabbit, ears within ears',
+            'knot          a torus knot: a line wound round a doughnut, twice one way and five times the other',
             'koch          the Koch snowflake, an infinitely long edge around a finite area',
             'langton       Langton\'s ant: ten thousand steps of mess, then out of nowhere a highway',
             'life          Conway\'s Game of Life: a glider gun firing gliders, with trails',
@@ -776,6 +873,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'mandelbrot    the whole Mandelbrot set, glowing toward its edge',
             'newton        Newton\'s method on z^3 - 1, three basins with a fractal border',
             'pascal        Pascal\'s triangle mod 2, which turns out to be Sierpinski\'s',
+            'penrose       a Penrose tiling: two rhombs covering the plane without ever repeating',
             'phase         a phase portrait: zeros and poles of a complex function as color pinwheels',
             'piwalk        a walk steered by the first thousand digits of pi',
             'rule30        Wolfram\'s rule 30, one cell growing into chaos',
@@ -876,7 +974,7 @@ my @usage = (
 subtest 'cmd_math refuses bad input' => sub {
     my $item = FakeItem->new;
     cmd_math('nope', FakeServer->new, $item);
-    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian buddhabrot burningship chladni clifford collatz dragon fern ford harmonograph hilbert julia koch langton life logistic lorenz lyapunov mandelbrot newton pascal phase piwalk rule30 sandpile seahorse spirograph sunflower timestable ulam zeta', 'CLIENTERROR' ] ],
+    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian buddhabrot burningship chladni clifford collatz dragon fern ford fourier golden harmonograph hilbert julia knot koch langton life logistic lorenz lyapunov mandelbrot newton pascal penrose phase piwalk rule30 sandpile seahorse spirograph sunflower timestable ulam zeta', 'CLIENTERROR' ] ],
         'unknown piece';
 
     @printed = ();
