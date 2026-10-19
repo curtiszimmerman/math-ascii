@@ -1229,6 +1229,218 @@ sub penrose_canvas {
     return $canvas;
 }
 
+# Recamán's sequence: start at 0, and at step n go back n if that lands on a
+# number that's above zero and hasn't come up yet, otherwise go forward n.
+# Returns the first $count terms.
+sub recaman_sequence {
+    my ($count) = @_;
+    my @terms = (0);
+    my %seen  = (0 => 1);
+    for my $n (1 .. $count - 1) {
+        my $back = $terms[-1] - $n;
+        push @terms, $back > 0 && !$seen{$back} ? $back : $terms[-1] + $n;
+        $seen{ $terms[-1] } = 1;
+    }
+    return @terms;
+}
+
+# Each step drawn as a half circle from one term to the next, above the
+# line and below it by turns, the hue moving along as the steps get longer.
+sub recaman_canvas {
+    my @terms = recaman_sequence(45);
+    my $scale = 138 / List::Util::max(@terms);
+    my $pi    = 4 * atan2(1, 1);
+    my @points;
+    for my $n (1 .. $#terms) {
+        my ($middle, $radius) = (($terms[ $n - 1 ] + $terms[$n]) / 2, abs($terms[$n] - $terms[ $n - 1 ]) / 2);
+        my $side  = $n % 2 ? 1 : -1;
+        my $steps = POSIX::ceil(2 * $pi * $radius * $scale);
+        my @arc = map {
+            my $angle = $pi * $_ / $steps;
+            [ 23.5 - $side * $radius * sin($angle) * $scale / 2, 1 + ($middle + $radius * cos($angle)) * $scale ];
+        } 0 .. $steps;
+        push @points, map { line_points(@arc[ $_ - 1, $_ ], $n / $#terms) } 1 .. $#arc;
+    }
+    my $canvas = glow_lines_canvas(\@points, \@ZETA_HUES, 0.35);
+    put_text($canvas, 0, 1, 'Recaman: 0 1 3 6 2 7 13 20 12 21 11 22 10 23 9 ...', 97);
+    put_text($canvas, 1, 1, 'step n goes back if it can, otherwise forward',     94);
+    return $canvas;
+}
+
+# The Pythagoras tree: a square, and on its top a right triangle whose two
+# short sides each grow another square, and so on, $levels times. $angle is
+# where the triangle's right angle sits, measured at its left corner. The
+# two new squares together have the area of the one below them, by
+# Pythagoras's theorem, so every level has the same area as the trunk.
+# Returns [depth, A, B, C, D] squares, A to B the bottom and C, D the top,
+# trunk first and each level after the one before.
+sub pythagoras_tree {
+    my ($levels, $angle) = @_;
+    my @squares;
+    my @to_grow = ([ 0, [ 0, 0 ], [ 1, 0 ] ]);
+    while (my $base = shift @to_grow) {
+        my ($depth, $a, $b) = @$base;
+        my @side = ($b->[0] - $a->[0], $b->[1] - $a->[1]);
+        my ($c, $d) = map { [ $_->[0] - $side[1], $_->[1] + $side[0] ] } $b, $a;
+        push @squares, [ $depth, $a, $b, $c, $d ];
+        next if $depth == $levels;
+        my $apex = [
+            $d->[0] + cos($angle) * (cos($angle) * $side[0] - sin($angle) * $side[1]),
+            $d->[1] + cos($angle) * (sin($angle) * $side[0] + cos($angle) * $side[1]),
+        ];
+        push @to_grow, [ $depth + 1, $d, $apex ], [ $depth + 1, $apex, $c ];
+    }
+    return @squares;
+}
+
+# Eight levels, leaning a little, the color running from a brown trunk
+# through green to blossom at the tips.
+my @PYTHAGORAS_GROWTH = (
+    [ 0,    116, 58,  0 ],
+    [ 0.3,  181, 99,  0 ],
+    [ 0.55, 0,   181, 0 ],
+    [ 0.8,  111, 255, 111 ],
+    [ 1,    255, 156, 255 ],
+);
+
+sub pythagoras_canvas {
+    my $levels  = 8;
+    my @squares = pythagoras_tree($levels, 0.66);
+    my $pixel   = fit_to_frame([ map { @$_[ 1 .. 4 ] } @squares ]);
+    my @rgb     = map { [ map { [ 0, 0, 0 ] } 1 .. 140 ] } 1 .. 48;
+    for my $square (@squares) {
+        my ($depth, @corners) = @$square;
+        fill_polygon(\@rgb, [ map { $pixel->(@$_) } @corners ], [ gradient_rgb(\@PYTHAGORAS_GROWTH, $depth / $levels) ]);
+    }
+    my @palette = (gradient_palette(\@PYTHAGORAS_GROWTH), $BLACK);
+    my $canvas  = pixels_to_canvas([ map { [ map { nearest_color_in(\@palette, @$_) } @$_ ] } @rgb ]);
+    put_text($canvas, 0, 1, 'the Pythagoras tree:', 97);
+    put_text($canvas, 1, 1, 'a^2 + b^2 = c^2',      94);
+    return $canvas;
+}
+
+# A tiling of the hyperbolic plane by triangles with angles pi/p, pi/q and
+# pi/2, drawn in the Poincaré disk, where straight lines are arcs that meet
+# the edge at right angles. One triangle has its corners at the middle, on
+# the x axis and on a line slanting up at pi/p; its third side is a circle
+# centered on the x axis, which hyperbolic_mirror finds. Reflecting in the
+# three sides over and over tiles the whole disk.
+sub hyperbolic_mirror {
+    my ($p, $q) = @_;
+    my $pi     = 4 * atan2(1, 1);
+    my $center = cos($pi / $q) / sqrt(cos($pi / $q)**2 - sin($pi / $p)**2);
+    return ($center, sqrt($center**2 - 1));
+}
+
+# Reflection in a circle centered on the x axis, which in the disk is a
+# reflection in a straight line.
+sub hyperbolic_reflect {
+    my ($x, $y, $center, $radius) = @_;
+    my $f = $radius**2 / (($x - $center)**2 + $y**2);
+    return ($center + ($x - $center) * $f, $y * $f);
+}
+
+# Reflects (x, y) in whichever side of the starting triangle it's beyond
+# until it's inside. Returns where it lands and how many times that crossed
+# the curved side. The 2p triangles round the middle make a p-sided tile, and
+# its sides are all copies of the curved side, so that count is how many tile
+# edges the point is from the middle tile. With an even q, an even number of
+# edges meet at every corner, so its evenness colors the tiles like a
+# chessboard.
+sub hyperbolic_fold {
+    my ($x, $y, $p, $q) = @_;
+    my ($center, $radius) = hyperbolic_mirror($p, $q);
+    my $slant = 4 * atan2(1, 1) / $p;
+    my ($s, $c) = (sin(2 * $slant), cos(2 * $slant));
+    my $crossings = 0;
+    for (1 .. 500) {
+        if ($y < 0) {
+            $y = -$y;
+        } elsif ($y * cos($slant) - $x * sin($slant) > 0) {
+            ($x, $y) = ($x * $c + $y * $s, $x * $s - $y * $c);
+        } elsif (($x - $center)**2 + $y**2 < $radius**2) {
+            ($x, $y) = hyperbolic_reflect($x, $y, $center, $radius);
+            $crossings++;
+        } else {
+            last;
+        }
+    }
+    return ($x, $y, $crossings);
+}
+
+# The {5, 4} tiling: pentagons, four at every corner, though in flat space
+# four pentagons can't meet at a point. They're all the same size; they only
+# look smaller toward the edge of the disk. Each is shaded from bright in its
+# middle to dark at its edges, the two colors alternating, and each pixel
+# averages four samples so the shrinking tiles at the rim blend into the dark.
+my @HYPERBOLIC_EVEN = ([ 0, 0, 0, 0 ], [ 0.3, 0, 116, 116 ], [ 0.7, 0, 255, 255 ], [ 1, 255, 255, 255 ]);
+my @HYPERBOLIC_ODD  = ([ 0, 0, 0, 0 ], [ 0.3, 117, 0, 181 ], [ 0.7, 255, 0, 255 ], [ 1, 255, 156, 255 ]);
+
+sub hyperbolic_canvas {
+    my ($p, $q) = (5, 4);
+    my ($center, $radius) = hyperbolic_mirror($p, $q);
+    my @palette = (gradient_palette(\@HYPERBOLIC_EVEN), gradient_palette(\@HYPERBOLIC_ODD), $BLACK);
+    my @pixels  = map {
+        my $r = $_;
+        [ map {
+            my $c = $_;
+            my @samples = map {
+                my ($x, $y) = (($c - 69.75 + $_->[1]) / 47, (23.75 - $r - $_->[0]) * 2 / 47);
+                if ($x**2 + $y**2 >= 1) {
+                    [ 0, 0, 0 ];
+                } else {
+                    my ($fx, $fy, $crossings) = hyperbolic_fold($x, $y, $p, $q);
+                    my $inside = (sqrt(($fx - $center)**2 + $fy**2) - $radius) / ($center - $radius);
+                    [ gradient_rgb($crossings % 2 ? \@HYPERBOLIC_ODD : \@HYPERBOLIC_EVEN, $inside**0.5) ];
+                }
+            } [ 0, 0 ], [ 0, 0.5 ], [ 0.5, 0 ], [ 0.5, 0.5 ];
+            nearest_color_in(\@palette, @{ average_rgb(@samples) });
+        } 0 .. 139 ];
+    } 0 .. 47;
+    my $canvas = pixels_to_canvas(\@pixels);
+    put_text($canvas, 0, 1, 'the hyperbolic plane:', 97);
+    put_text($canvas, 1, 1, 'pentagons, four to',    94);
+    put_text($canvas, 2, 1, 'a corner, all the',     94);
+    put_text($canvas, 3, 1, 'same size',             94);
+    return $canvas;
+}
+
+# Two point sources dropping ripples into still water, $gap apart on the x
+# axis, as cos(2 pi (r / wavelength - time)) from each, added together. Where
+# one source is a whole number of waves further than the other the ripples
+# add up; where it's a half number they cancel, along hyperbolas.
+sub ripple_height {
+    my ($x, $y, $gap, $wavelength, $time) = @_;
+    my $pi = 4 * atan2(1, 1);
+    return List::Util::sum(map {
+        my $r = sqrt(($x - $_)**2 + $y**2);
+        cos(2 * $pi * ($r / $wavelength - $time));
+    } -$gap / 2, $gap / 2);
+}
+
+# The water in four shades from deep blue in the troughs to pale at the
+# crests, the calm lines where the waves cancel staying mid teal. The
+# sources are 2.5 waves apart, so along the line through them, outside the
+# gap, they always cancel. Distances are in pixel widths.
+my @RIPPLE_SHADES = (23, 35, 34, 46, 82);
+
+sub ripples_canvas {
+    my $wavelength = 14;
+    my $gap        = 2.5 * $wavelength;
+    my @pixels = map {
+        my $y = (23.5 - $_) * 2;
+        [ map {
+            my $level = (ripple_height($_ - 69.5, $y, $gap, $wavelength, 0) + 2) / 4;
+            $RIPPLE_SHADES[ List::Util::min($#RIPPLE_SHADES, int($level * @RIPPLE_SHADES)) ];
+        } 0 .. 139 ];
+    } 0 .. 47;
+    my $canvas = pixels_to_canvas(\@pixels);
+    put_text($canvas, 11, 1, 'calm wherever the', 97);
+    put_text($canvas, 12, 1, 'two are half a wave', 97);
+    put_text($canvas, 13, 1, 'out of step', 97);
+    return $canvas;
+}
+
 # The (p, q) torus knot: a line wound round a doughnut, p times round the
 # hole and q times round the tube, closing up after one trip. When p and q
 # share no factor it's a single knotted loop. The tube has radius 1 and runs
@@ -2276,6 +2488,10 @@ our %PIECES = (
     fourier    => { draw => \&fourier_canvas,    about => 'a square wave built from sine waves, overshooting at every corner' },
     penrose    => { draw => \&penrose_canvas,    about => 'a Penrose tiling: two rhombs covering the plane without ever repeating' },
     knot       => { draw => \&knot_canvas,      about => 'a torus knot: a line wound round a doughnut, twice one way and five times the other' },
+    recaman    => { draw => \&recaman_canvas,    about => 'Recaman\'s sequence: hop back if you can, forward if you can\'t, drawn as arcs' },
+    pythagoras => { draw => \&pythagoras_canvas, about => 'the Pythagoras tree: squares on the sides of right triangles, branching forever' },
+    hyperbolic => { draw => \&hyperbolic_canvas, about => 'the hyperbolic plane in a disk, tiled by same-size pentagons, four to a corner' },
+    ripples    => { draw => \&ripples_canvas,    about => 'ripples from two stones meeting, calm wherever they cancel' },
     golden     => { draw => \&golden_canvas,    about => 'the golden spiral, drawn through squares whose sides are the Fibonacci numbers' },
     langton    => { draw => \&langton_canvas,    about => 'Langton\'s ant: ten thousand steps of mess, then out of nowhere a highway' },
     lyapunov   => { draw => \&lyapunov_canvas,   about => 'a Lyapunov fractal: where a logistic map flipping between two rates settles or turns to chaos' },

@@ -550,6 +550,81 @@ subtest 'penrose_triangles' => sub {
         'and they still cover exactly the starting wheel';
 };
 
+subtest 'recaman_sequence' => sub {
+    is join(' ', recaman_sequence(21)), '0 1 3 6 2 7 13 20 12 21 11 22 10 23 9 24 8 25 43 62 42',
+        'step back by n if that lands on a new positive number, otherwise forward (worked by hand)';
+    my @terms = recaman_sequence(500);
+    my @bad = grep { abs($terms[$_] - $terms[ $_ - 1 ]) != $_ || $terms[$_] < 0 } 1 .. $#terms;
+    is_deeply \@bad, [], 'every step is exactly n long and never goes below zero';
+};
+
+subtest 'pythagoras_tree' => sub {
+    for my $angle (0.785398163397448, 0.6) {
+        my @squares = pythagoras_tree(6, $angle);
+        is scalar @squares, 127, "a trunk and six levels of branches make 127 squares (angle $angle)";
+        my %area;
+        for my $square (@squares) {
+            my ($depth, $a, $b) = @$square;
+            $area{$depth} += ($b->[0] - $a->[0])**2 + ($b->[1] - $a->[1])**2;
+        }
+        my @wrong = grep { abs($area{$_} - 1) > 1e-9 } sort keys %area;
+        is_deeply \@wrong, [], 'every level has the same area as the trunk, which is Pythagoras\'s theorem';
+    }
+    my ($trunk, $left, $right) = pythagoras_tree(1, 0.6);
+    my ($apex, $from, $to) = ($left->[2], $left->[1], $right->[2]);
+    ok abs(($from->[0] - $apex->[0]) * ($to->[0] - $apex->[0]) + ($from->[1] - $apex->[1]) * ($to->[1] - $apex->[1])) < 1e-12,
+        'the two branches meet at a right angle';
+};
+
+subtest 'hyperbolic tiling' => sub {
+    my ($p, $q) = (7, 3);
+    my ($center, $radius) = hyperbolic_mirror($p, $q);
+    my $pi = 4 * atan2(1, 1);
+    ok abs($center**2 - $radius**2 - 1) < 1e-12, 'the curved mirror meets the edge of the disk at right angles';
+    my $angle = POSIX::acos($center * sin($pi / $p) / $radius);
+    ok abs($angle - $pi / $q) < 1e-12, 'and meets the slanted mirror at pi/q';
+
+    my $distance = sub {
+        my ($u, $v) = @_;
+        my $gap = ($u->[0] - $v->[0])**2 + ($u->[1] - $v->[1])**2;
+        return POSIX::acosh(1 + 2 * $gap / ((1 - $u->[0]**2 - $u->[1]**2) * (1 - $v->[0]**2 - $v->[1]**2)));
+    };
+    my ($u, $v) = ([ 0.1, 0.2 ], [ 0.5, -0.3 ]);
+    my @mirrored = map { [ hyperbolic_reflect(@$_, $center, $radius) ] } $u, $v;
+    ok abs($distance->($u, $v) - $distance->(@mirrored)) < 1e-9, 'reflecting in the curved mirror keeps hyperbolic distances';
+
+    my @outside;
+    for my $x (map { -0.95 + $_ / 10 } 0 .. 19) {
+        for my $y (map { -0.95 + $_ / 10 } 0 .. 19) {
+            next if $x**2 + $y**2 >= 0.99;
+            my ($fx, $fy) = hyperbolic_fold($x, $y, $p, $q);
+            push @outside, "$x,$y"
+                if $fy < -1e-12 || $fy * cos($pi / $p) - $fx * sin($pi / $p) > 1e-12 || ($fx - $center)**2 + $fy**2 < $radius**2 - 1e-12;
+        }
+    }
+    is_deeply \@outside, [], 'folding takes every point of the disk into the one starting triangle';
+
+    # In the {5,4} tiling the middle pentagon's edge crosses the x axis
+    # where the curved mirror does, at center - radius.
+    ($center, $radius) = hyperbolic_mirror(5, 4);
+    my $edge = $center - $radius;
+    my @counts = map { (hyperbolic_fold($_, 0.001, 5, 4))[2] } $edge - 0.01, $edge + 0.01;
+    is_deeply \@counts, [ 0, 1 ], 'stepping over a pentagon\'s edge is one crossing';
+    is((hyperbolic_fold(0.1, -0.05, 5, 4))[2], 0, 'and moving about inside one is none');
+};
+
+subtest 'ripple_height' => sub {
+    my ($gap, $wavelength, $pi) = (4, 1, 4 * atan2(1, 1));
+    ok abs(ripple_height(0, 7, $gap, $wavelength, 0) - 2 * cos(2 * $pi * sqrt(4 + 49))) < 1e-12,
+        'halfway between the sources the two waves arrive together and add up';
+    # The sources are at x = -2 and 2. On this hyperbola the left one is always
+    # half a wave further away than the right one.
+    my $x = 0.25 * sqrt(1 + 9 / (4 - 0.25**2));
+    for my $time (0, 0.13, 0.5) {
+        ok abs(ripple_height($x, 3, $gap, $wavelength, $time)) < 1e-9, "where the paths differ by half a wave they cancel (time $time)";
+    }
+};
+
 subtest 'pi_digits' => sub {
     my @digits = pi_digits(800);
     is scalar @digits, 800, 'as many digits as asked for';
@@ -824,7 +899,7 @@ subtest 'cmd_math with no piece lists the pieces' => sub {
     my $server = FakeServer->new;
     my $item   = FakeItem->new;
     cmd_math('', $server, $item);
-    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian buddhabrot burningship chladni clifford collatz dragon fern ford fourier golden harmonograph hilbert julia knot koch langton life logistic lorenz lyapunov mandelbrot newton pascal penrose phase piwalk rule30 sandpile seahorse spirograph sunflower timestable ulam zeta', 'CLIENTCRAP' ] ];
+    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian buddhabrot burningship chladni clifford collatz dragon fern ford fourier golden harmonograph hilbert hyperbolic julia knot koch langton life logistic lorenz lyapunov mandelbrot newton pascal penrose phase piwalk pythagoras recaman ripples rule30 sandpile seahorse spirograph sunflower timestable ulam zeta', 'CLIENTCRAP' ] ];
     is_deeply $server->{sent}, [], 'nothing was sent';
 };
 
@@ -862,6 +937,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'golden        the golden spiral, drawn through squares whose sides are the Fibonacci numbers',
             'harmonograph  two damped pendulums drawing on paper, spiraling in as they tire',
             'hilbert       the Hilbert curve, one line through all 256 squares of a grid',
+            'hyperbolic    the hyperbolic plane in a disk, tiled by same-size pentagons, four to a corner',
             'julia         the Julia set called Douady\'s rabbit, ears within ears',
             'knot          a torus knot: a line wound round a doughnut, twice one way and five times the other',
             'koch          the Koch snowflake, an infinitely long edge around a finite area',
@@ -876,6 +952,9 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'penrose       a Penrose tiling: two rhombs covering the plane without ever repeating',
             'phase         a phase portrait: zeros and poles of a complex function as color pinwheels',
             'piwalk        a walk steered by the first thousand digits of pi',
+            'pythagoras    the Pythagoras tree: squares on the sides of right triangles, branching forever',
+            'recaman       Recaman\'s sequence: hop back if you can, forward if you can\'t, drawn as arcs',
+            'ripples       ripples from two stones meeting, calm wherever they cancel',
             'rule30        Wolfram\'s rule 30, one cell growing into chaos',
             'sandpile      the Abelian sandpile: grains dropped on one square, toppling in fours',
             'seahorse      a seahorse tail in Seahorse Valley, 600 times closer',
@@ -974,7 +1053,7 @@ my @usage = (
 subtest 'cmd_math refuses bad input' => sub {
     my $item = FakeItem->new;
     cmd_math('nope', FakeServer->new, $item);
-    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian buddhabrot burningship chladni clifford collatz dragon fern ford fourier golden harmonograph hilbert julia knot koch langton life logistic lorenz lyapunov mandelbrot newton pascal penrose phase piwalk rule30 sandpile seahorse spirograph sunflower timestable ulam zeta', 'CLIENTERROR' ] ],
+    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian buddhabrot burningship chladni clifford collatz dragon fern ford fourier golden harmonograph hilbert hyperbolic julia knot koch langton life logistic lorenz lyapunov mandelbrot newton pascal penrose phase piwalk pythagoras recaman ripples rule30 sandpile seahorse spirograph sunflower timestable ulam zeta', 'CLIENTERROR' ] ],
         'unknown piece';
 
     @printed = ();
