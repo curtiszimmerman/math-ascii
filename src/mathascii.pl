@@ -943,6 +943,62 @@ sub langton_canvas {
     return $canvas;
 }
 
+# The Lyapunov exponent of the logistic map x -> r x (1 - x) when r takes
+# turns between two values: the letters of $sequence, repeated forever, say
+# whether each step uses $a or $b. The exponent is the average log of how
+# much each step stretches the gap between two nearby points, the slope
+# r (1 - 2x). Below zero, nearby points get pulled together and the orbit
+# settles into a cycle; above zero they get pushed apart, which is chaos. We
+# skip the first steps so the orbit has time to settle, and start from 0.4
+# because 0.5 lands on 1 and then 0 for good when r is 4.
+my $LYAPUNOV_SETTLE = 300;
+
+sub lyapunov_exponent {
+    my ($sequence, $a, $b, $count) = @_;
+    my @r = map { $_ eq 'A' ? $a : $b } split //, $sequence;
+    my ($x, $total) = (0.4, 0);
+    for my $step (0 .. $LYAPUNOV_SETTLE + $count - 1) {
+        my $r = $r[ $step % @r ];
+        # A slope of exactly zero would mean an exponent of minus infinity.
+        $total += log(List::Util::max(abs($r * (1 - 2 * $x)), 1e-12)) if $step >= $LYAPUNOV_SETTLE;
+        $x = $r * $x * (1 - $x);
+    }
+    return $total / $count;
+}
+
+# Mario Markus's picture: every pixel is a pair (a, b), gold where the orbit
+# settles into a cycle, brighter the more firmly, and black where it's chaos.
+# Orbits right at the edge of chaos have an exponent near zero, which shows
+# up dark either way, so the edge doesn't sparkle.
+my @LYAPUNOV_ORDER = (
+    [ 0,    71,  33,  0 ],
+    [ 0.2,  116, 58,  0 ],
+    [ 0.4,  181, 99,  0 ],
+    [ 0.6,  255, 140, 0 ],
+    [ 0.85, 255, 255, 0 ],
+    [ 1,    255, 255, 255 ],
+);
+sub lyapunov_canvas {
+    my ($sequence, $a_min, $a_max, $b_min, $b_max) = ('AB', 2, 4, 2.6, 4);
+    my @order = gradient_palette(\@LYAPUNOV_ORDER);
+    my @pixels = map {
+        my $b = $b_max - ($_ + 0.5) / 48 * ($b_max - $b_min);
+        [ map {
+            my $a = $a_min + ($_ + 0.5) / 140 * ($a_max - $a_min);
+            my $exponent = lyapunov_exponent($sequence, $a, $b, 200);
+            $exponent < 0
+                ? nearest_color_in(\@order, gradient_rgb(\@LYAPUNOV_ORDER, -$exponent / 1.5))
+                : $BLACK;
+        } 0 .. 139 ];
+    } 0 .. 47;
+    my $canvas = pixels_to_canvas(\@pixels);
+    put_text($canvas, 20, 56, 'x -> rx(1 - x)', 97);
+    put_text($canvas, 21, 56, 'r: a,b,a,b,...', 94);
+    put_text($canvas, 22, 56, 'gold: order',    94);
+    put_text($canvas, 23, 56, 'black: chaos',   94);
+    return $canvas;
+}
+
 # An elementary cellular automaton: a row of cells, each on or off, where the
 # next row's cell is decided by the cell above it and that cell's two
 # neighbors. Those three make a number from 0 to 7, and that bit of the rule
@@ -1918,6 +1974,7 @@ our %PIECES = (
     life       => { draw => \&life_canvas,       about => 'Conway\'s Game of Life: a glider gun firing gliders, with trails' },
     rule30     => { draw => \&rule30_canvas,     about => 'Wolfram\'s rule 30, one cell growing into chaos' },
     langton    => { draw => \&langton_canvas,    about => 'Langton\'s ant: ten thousand steps of mess, then out of nowhere a highway' },
+    lyapunov   => { draw => \&lyapunov_canvas,   about => 'a Lyapunov fractal: where a logistic map flipping between two rates settles or turns to chaos' },
     sandpile   => { draw => \&sandpile_canvas,   about => 'the Abelian sandpile: grains dropped on one square, toppling in fours' },
     piwalk     => { draw => \&piwalk_canvas,     about => 'a walk steered by the first thousand digits of pi' },
     phase      => { draw => \&phase_canvas,      about => 'a phase portrait: zeros and poles of a complex function as color pinwheels' },

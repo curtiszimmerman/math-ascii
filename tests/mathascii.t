@@ -422,6 +422,18 @@ subtest 'langton_ant' => sub {
     is scalar(keys %{ $late->{black} }) - scalar(keys %{ $early->{black} }), 12, 'and leaves twelve more black squares';
 };
 
+subtest 'lyapunov_exponent' => sub {
+    # With only A in the sequence it's the plain logistic map at r = a.
+    # At r = 2.5 it settles on x = 0.6, where the slope r(1 - 2x) is -0.5.
+    ok abs(lyapunov_exponent('A', 2.5, 0, 2000) - log 0.5) < 1e-9, 'a fixed point gives the log of its slope';
+    ok abs(lyapunov_exponent('A', 4, 0, 200_000) - log 2) < 0.01, 'at r = 4 it is exactly log 2 (Ulam and von Neumann)';
+    ok lyapunov_exponent('A', 3.2, 0, 2000) < 0, 'a period-2 cycle is stable';
+    ok lyapunov_exponent('A', 3.9, 0, 2000) > 0, 'r = 3.9 is chaotic';
+    is lyapunov_exponent('AB', 3.7, 3.7, 2000), lyapunov_exponent('A', 3.7, 0, 2000), 'with a = b the sequence makes no difference';
+    ok abs(lyapunov_exponent('AB', 3.2, 3.5, 2000) - lyapunov_exponent('AB', 3.5, 3.2, 2000)) < 1e-9,
+        'swapping a and b only shifts the cycle by a step, which leaves its stability alone';
+};
+
 subtest 'pi_digits' => sub {
     my @digits = pi_digits(800);
     is scalar @digits, 800, 'as many digits as asked for';
@@ -696,7 +708,7 @@ subtest 'cmd_math with no piece lists the pieces' => sub {
     my $server = FakeServer->new;
     my $item   = FakeItem->new;
     cmd_math('', $server, $item);
-    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian buddhabrot burningship chladni clifford collatz dragon fern harmonograph hilbert julia koch langton life logistic lorenz mandelbrot newton pascal phase piwalk rule30 sandpile seahorse spirograph sunflower timestable ulam zeta', 'CLIENTCRAP' ] ];
+    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian buddhabrot burningship chladni clifford collatz dragon fern harmonograph hilbert julia koch langton life logistic lorenz lyapunov mandelbrot newton pascal phase piwalk rule30 sandpile seahorse spirograph sunflower timestable ulam zeta', 'CLIENTCRAP' ] ];
     is_deeply $server->{sent}, [], 'nothing was sent';
 };
 
@@ -737,6 +749,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'life          Conway\'s Game of Life: a glider gun firing gliders, with trails',
             'logistic      the logistic map doubling its period over and over until it turns to chaos',
             'lorenz        the Lorenz attractor, the butterfly of chaos',
+            'lyapunov      a Lyapunov fractal: where a logistic map flipping between two rates settles or turns to chaos',
             'mandelbrot    the whole Mandelbrot set, glowing toward its edge',
             'newton        Newton\'s method on z^3 - 1, three basins with a fractal border',
             'pascal        Pascal\'s triangle mod 2, which turns out to be Sierpinski\'s',
@@ -840,7 +853,7 @@ my @usage = (
 subtest 'cmd_math refuses bad input' => sub {
     my $item = FakeItem->new;
     cmd_math('nope', FakeServer->new, $item);
-    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian buddhabrot burningship chladni clifford collatz dragon fern harmonograph hilbert julia koch langton life logistic lorenz mandelbrot newton pascal phase piwalk rule30 sandpile seahorse spirograph sunflower timestable ulam zeta', 'CLIENTERROR' ] ],
+    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian buddhabrot burningship chladni clifford collatz dragon fern harmonograph hilbert julia koch langton life logistic lorenz lyapunov mandelbrot newton pascal phase piwalk rule30 sandpile seahorse spirograph sunflower timestable ulam zeta', 'CLIENTERROR' ] ],
         'unknown piece';
 
     @printed = ();
