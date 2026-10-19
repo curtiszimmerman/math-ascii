@@ -362,6 +362,40 @@ sub density_canvas {
     return pixels_to_canvas(\@pixels);
 }
 
+# Fills a convex polygon, its corners [row, col] in fractional pixels in
+# order round it, with one RGB color on a grid of RGB pixels. A pixel is in
+# when its center is on the inner side of every edge, or right on one.
+sub fill_polygon {
+    my ($rgb, $corners, $color) = @_;
+    my ($rows, $cols) = (scalar @$rgb, scalar @{ $rgb->[0] });
+    my $inside = sub {
+        my ($r, $c) = @_;
+        my @sides = map {
+            my ($from, $to) = @$corners[ $_, ($_ + 1) % @$corners ];
+            ($to->[1] - $from->[1]) * ($r - $from->[0]) - ($to->[0] - $from->[0]) * ($c - $from->[1]);
+        } 0 .. $#$corners;
+        return !(grep { $_ < 0 } @sides) || !(grep { $_ > 0 } @sides);
+    };
+    for my $r (POSIX::ceil(List::Util::min(map { $_->[0] } @$corners)) .. POSIX::floor(List::Util::max(map { $_->[0] } @$corners))) {
+        next if $r < 0 || $r >= $rows;
+        for my $c (POSIX::ceil(List::Util::min(map { $_->[1] } @$corners)) .. POSIX::floor(List::Util::max(map { $_->[1] } @$corners))) {
+            next if $c < 0 || $c >= $cols;
+            $rgb->[$r][$c] = [@$color] if $inside->($r, $c);
+        }
+    }
+}
+
+# Sets the pixel nearest each [row, col] point to one RGB color, for hard
+# one-pixel lines such as borders.
+sub paint_points {
+    my ($rgb, $points, $color) = @_;
+    my ($rows, $cols) = (scalar @$rgb, scalar @{ $rgb->[0] });
+    for my $point (@$points) {
+        my ($r, $c) = map { POSIX::floor($_ + 0.5) } @$point[ 0, 1 ];
+        $rgb->[$r][$c] = [@$color] if $r >= 0 && $r < $rows && $c >= 0 && $c < $cols;
+    }
+}
+
 # Points every pixel or so along a straight line between two [row, col]
 # pixel positions, for draw_glow_curve, all at the same gradient position.
 sub line_points {
@@ -1112,24 +1146,14 @@ sub golden_canvas {
     my $bottom  = List::Util::min(map { $_->{y} } @squares);
     my $pixel   = sub { [ 45 - ($_[1] - $bottom) * $scale / 2, 0.5 + ($_[0] - $left) * $scale ] };
     my @rgb = map { [ map { [ 0, 0, 0 ] } 1 .. 140 ] } 1 .. 48;
-    for my $i (0 .. $#squares) {
-        my $s = $squares[$i];
-        my ($top_left, $bottom_right) = ($pixel->($s->{x}, $s->{y} + $s->{size}), $pixel->($s->{x} + $s->{size}, $s->{y}));
-        for my $r (POSIX::ceil($top_left->[0]) .. POSIX::floor($bottom_right->[0])) {
-            for my $c (POSIX::ceil($top_left->[1]) .. POSIX::floor($bottom_right->[1])) {
-                next if $r < 0 || $r > 47 || $c < 0 || $c > 139;
-                $rgb[$r][$c] = [ rgb($GOLDEN_SHADES[$i]) ];
-            }
-        }
-    }
+    my $corners = sub {
+        my ($s) = @_;
+        return map { $pixel->(@$_) } [ $s->{x}, $s->{y} ], [ $s->{x} + $s->{size}, $s->{y} ], [ $s->{x} + $s->{size}, $s->{y} + $s->{size} ], [ $s->{x}, $s->{y} + $s->{size} ];
+    };
+    fill_polygon(\@rgb, [ $corners->($squares[$_]) ], [ rgb($GOLDEN_SHADES[$_]) ]) for 0 .. $#squares;
     for my $s (@squares) {
-        my @corners = map { $pixel->(@$_) } [ $s->{x}, $s->{y} ], [ $s->{x} + $s->{size}, $s->{y} ], [ $s->{x} + $s->{size}, $s->{y} + $s->{size} ], [ $s->{x}, $s->{y} + $s->{size} ];
-        for my $edge (map { [ line_points(@corners[ $_ - 1, $_ ], 0) ] } 0 .. 3) {
-            for my $point (@$edge) {
-                my ($r, $c) = map { POSIX::floor($_ + 0.5) } @$point[ 0, 1 ];
-                $rgb[$r][$c] = [ 0, 0, 0 ] if $r >= 0 && $r <= 47 && $c >= 0 && $c <= 139;
-            }
-        }
+        my @square = $corners->($s);
+        paint_points(\@rgb, [ map { line_points(@square[ $_ - 1, $_ ], 0) } 0 .. 3 ], [ 0, 0, 0 ]);
     }
     my @points;
     for my $i (0 .. $#squares) {
@@ -1187,36 +1211,18 @@ my @PENROSE_THICK = ([ 0, 255, 140, 0 ], [ 1, 116, 0, 0 ]);
 my @PENROSE_THIN  = ([ 0, 0, 255, 255 ], [ 1, 0, 0, 116 ]);
 
 sub penrose_canvas {
-    my $scale  = 100;
-    my @rgb    = map { [ map { [ 0, 0, 0 ] } 1 .. 140 ] } 1 .. 48;
-    my $pixel  = sub { centered_pixel(@{ $_[0] }, $scale) };
-    my $inside = sub {
-        my ($point, @corners) = @_;
-        my @sides = map {
-            my ($from, $to) = @corners[ $_, ($_ + 1) % 3 ];
-            ($to->[1] - $from->[1]) * ($point->[0] - $from->[0]) - ($to->[0] - $from->[0]) * ($point->[1] - $from->[1]);
-        } 0 .. 2;
-        return !(grep { $_ < 0 } @sides) || !(grep { $_ > 0 } @sides);
-    };
+    my $scale = 100;
+    my @rgb   = map { [ map { [ 0, 0, 0 ] } 1 .. 140 ] } 1 .. 48;
+    my $pixel = sub { centered_pixel(@{ $_[0] }, $scale) };
     my @edges;
     for my $triangle (penrose_triangles(4)) {
         my ($kind, @corners) = @$triangle;
         my @on_screen = map { $pixel->($_) } @corners;
         my $middle    = [ map { my $i = $_; List::Util::sum(map { $_->[$i] } @corners) / 3 } 0, 1 ];
-        my @color     = gradient_rgb($kind ? \@PENROSE_THICK : \@PENROSE_THIN, sqrt($middle->[0]**2 + $middle->[1]**2));
-        for my $r (POSIX::ceil(List::Util::min(map { $_->[0] } @on_screen)) .. POSIX::floor(List::Util::max(map { $_->[0] } @on_screen))) {
-            next if $r < 0 || $r > 47;
-            for my $c (POSIX::ceil(List::Util::min(map { $_->[1] } @on_screen)) .. POSIX::floor(List::Util::max(map { $_->[1] } @on_screen))) {
-                next if $c < 0 || $c > 139;
-                $rgb[$r][$c] = [@color] if $inside->([ $r, $c ], @on_screen);
-            }
-        }
+        fill_polygon(\@rgb, \@on_screen, [ gradient_rgb($kind ? \@PENROSE_THICK : \@PENROSE_THIN, sqrt($middle->[0]**2 + $middle->[1]**2)) ]);
         push @edges, map { line_points(@on_screen[ @$_ ], 0) } [ 2, 0 ], [ 0, 1 ];
     }
-    for my $point (@edges) {
-        my ($r, $c) = map { POSIX::floor($_ + 0.5) } @$point[ 0, 1 ];
-        $rgb[$r][$c] = [ 0, 0, 0 ] if $r >= 0 && $r <= 47 && $c >= 0 && $c <= 139;
-    }
+    paint_points(\@rgb, \@edges, [ 0, 0, 0 ]);
     my @palette = (gradient_palette(\@PENROSE_THICK), gradient_palette(\@PENROSE_THIN), $BLACK);
     my $canvas  = pixels_to_canvas([ map { [ map { nearest_color_in(\@palette, @$_) } @$_ ] } @rgb ]);
     put_text($canvas, 23, 1, 'Penrose tiling: never repeats, thick:thin = phi', 97);
