@@ -882,6 +882,67 @@ sub sandpile_canvas {
     return $canvas;
 }
 
+# Langton's ant walks a grid of white squares: on a white square it turns
+# right, on a black one left, and either way it flips the square's color and
+# steps forward. Squares are "x,y" with y counting down the screen, and the
+# heading counts quarter turns clockwise from up. Returns where the ant ends
+# up after $steps, the black squares, and the step that last flipped each
+# square.
+my @ANT_MOVES = ([ 0, -1 ], [ 1, 0 ], [ 0, 1 ], [ -1, 0 ]);
+
+sub langton_ant {
+    my ($steps) = @_;
+    my ($x, $y, $heading) = (0, 0, 0);
+    my (%black, %painted);
+    for my $step (1 .. $steps) {
+        my $square = "$x,$y";
+        if ($black{$square}) {
+            $heading = ($heading + 3) % 4;
+            delete $black{$square};
+        } else {
+            $heading = ($heading + 1) % 4;
+            $black{$square} = 1;
+        }
+        $painted{$square} = $step;
+        $x += $ANT_MOVES[$heading][0];
+        $y += $ANT_MOVES[$heading][1];
+    }
+    return { x => $x, y => $y, heading => $heading, black => \%black, painted => \%painted };
+}
+
+# The ant's mess with the highway running out of it. Black squares are
+# colored by how long ago the ant painted them, so the highway it's building
+# now is brightest. Each square is two pixels wide so it draws square.
+my @LANGTON_AGE = (
+    [ 0,   46, 0,   71 ],
+    [ 0.5, 117, 0,   181 ],
+    [ 0.8, 255, 0,   152 ],
+    [ 1,   255, 156, 211 ],
+);
+
+sub langton_canvas {
+    my $steps   = 11_000;
+    my $ant     = langton_ant($steps);
+    my @palette = gradient_palette(\@LANGTON_AGE);
+    my @squares = map { [ split /,/ ] } keys %{ $ant->{black} };
+    my $left    = POSIX::floor((List::Util::min(map { $_->[0] } @squares) + List::Util::max(map { $_->[0] } @squares)) / 2) - 35;
+    my $top     = POSIX::floor((List::Util::min(map { $_->[1] } @squares) + List::Util::max(map { $_->[1] } @squares)) / 2) - 24;
+    my @pixels  = map {
+        my $y = $top + $_;
+        [ map {
+            my $square = ($left + $_) . ",$y";
+            ($ant->{black}{$square} ? nearest_color_in(\@palette, gradient_rgb(\@LANGTON_AGE, $ant->{painted}{$square} / $steps)) : $BLACK) x 2;
+        } 0 .. 69 ];
+    } 0 .. 47;
+    my $canvas = pixels_to_canvas(\@pixels);
+    put_text($canvas, 0, 1, 'Langton\'s ant:', 97);
+    put_text($canvas, 1, 1, 'white: turn right', 94);
+    put_text($canvas, 2, 1, 'black: turn left', 94);
+    put_text($canvas, 22, 1, 'after 10,000 steps', 94);
+    put_text($canvas, 23, 1, 'it builds a highway', 94);
+    return $canvas;
+}
+
 # An elementary cellular automaton: a row of cells, each on or off, where the
 # next row's cell is decided by the cell above it and that cell's two
 # neighbors. Those three make a number from 0 to 7, and that bit of the rule
@@ -1856,6 +1917,7 @@ our %PIECES = (
     clifford   => { draw => \&clifford_canvas,   about => 'a Clifford strange attractor, drawn like smoke' },
     life       => { draw => \&life_canvas,       about => 'Conway\'s Game of Life: a glider gun firing gliders, with trails' },
     rule30     => { draw => \&rule30_canvas,     about => 'Wolfram\'s rule 30, one cell growing into chaos' },
+    langton    => { draw => \&langton_canvas,    about => 'Langton\'s ant: ten thousand steps of mess, then out of nowhere a highway' },
     sandpile   => { draw => \&sandpile_canvas,   about => 'the Abelian sandpile: grains dropped on one square, toppling in fours' },
     piwalk     => { draw => \&piwalk_canvas,     about => 'a walk steered by the first thousand digits of pi' },
     phase      => { draw => \&phase_canvas,      about => 'a phase portrait: zeros and poles of a complex function as color pinwheels' },

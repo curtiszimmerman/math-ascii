@@ -403,6 +403,25 @@ subtest 'sandpile' => sub {
         'the piece\'s pile fits on its grid';
 };
 
+subtest 'langton_ant' => sub {
+    my $ant = langton_ant(4);
+    is_deeply [ sort keys %{ $ant->{black} } ], [ '0,0', '0,1', '1,0', '1,1' ],
+        'on white it turns right each time, so the first four steps paint a square';
+    is_deeply [ @$ant{qw(x y heading)} ], [ 0, 0, 0 ], 'and it ends back where it started, facing up';
+
+    $ant = langton_ant(5);
+    is_deeply [ sort keys %{ $ant->{black} } ], [ '0,1', '1,0', '1,1' ], 'the fifth step is on black: it turns it white';
+    is_deeply [ @$ant{qw(x y heading)} ], [ -1, 0, 3 ], 'and turns left';
+    is_deeply [ @{ $ant->{painted} }{qw(1,0 1,1 0,0)} ], [ 2, 3, 5 ], 'it remembers the step that last flipped each square';
+
+    # After about ten thousand steps of mess the ant starts building a
+    # "highway" that repeats every 104 steps, two squares further on.
+    my ($early, $late) = (langton_ant(11_000), langton_ant(11_104));
+    is_deeply [ map { abs($late->{$_} - $early->{$_}) } qw(x y) ], [ 2, 2 ], 'on the highway it moves two squares diagonally every 104 steps';
+    is $late->{heading}, $early->{heading}, 'facing the same way';
+    is scalar(keys %{ $late->{black} }) - scalar(keys %{ $early->{black} }), 12, 'and leaves twelve more black squares';
+};
+
 subtest 'pi_digits' => sub {
     my @digits = pi_digits(800);
     is scalar @digits, 800, 'as many digits as asked for';
@@ -677,7 +696,7 @@ subtest 'cmd_math with no piece lists the pieces' => sub {
     my $server = FakeServer->new;
     my $item   = FakeItem->new;
     cmd_math('', $server, $item);
-    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian buddhabrot burningship chladni clifford collatz dragon fern harmonograph hilbert julia koch life logistic lorenz mandelbrot newton pascal phase piwalk rule30 sandpile seahorse spirograph sunflower timestable ulam zeta', 'CLIENTCRAP' ] ];
+    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian buddhabrot burningship chladni clifford collatz dragon fern harmonograph hilbert julia koch langton life logistic lorenz mandelbrot newton pascal phase piwalk rule30 sandpile seahorse spirograph sunflower timestable ulam zeta', 'CLIENTCRAP' ] ];
     is_deeply $server->{sent}, [], 'nothing was sent';
 };
 
@@ -714,6 +733,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'hilbert       the Hilbert curve, one line through all 256 squares of a grid',
             'julia         the Julia set called Douady\'s rabbit, ears within ears',
             'koch          the Koch snowflake, an infinitely long edge around a finite area',
+            'langton       Langton\'s ant: ten thousand steps of mess, then out of nowhere a highway',
             'life          Conway\'s Game of Life: a glider gun firing gliders, with trails',
             'logistic      the logistic map doubling its period over and over until it turns to chaos',
             'lorenz        the Lorenz attractor, the butterfly of chaos',
@@ -820,7 +840,7 @@ my @usage = (
 subtest 'cmd_math refuses bad input' => sub {
     my $item = FakeItem->new;
     cmd_math('nope', FakeServer->new, $item);
-    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian buddhabrot burningship chladni clifford collatz dragon fern harmonograph hilbert julia koch life logistic lorenz mandelbrot newton pascal phase piwalk rule30 sandpile seahorse spirograph sunflower timestable ulam zeta', 'CLIENTERROR' ] ],
+    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian buddhabrot burningship chladni clifford collatz dragon fern harmonograph hilbert julia koch langton life logistic lorenz mandelbrot newton pascal phase piwalk rule30 sandpile seahorse spirograph sunflower timestable ulam zeta', 'CLIENTERROR' ] ],
         'unknown piece';
 
     @printed = ();
