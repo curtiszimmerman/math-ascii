@@ -434,6 +434,28 @@ subtest 'lyapunov_exponent' => sub {
         'swapping a and b only shifts the cycle by a step, which leaves its stability alone';
 };
 
+subtest 'ford circles' => sub {
+    is join(' ', map { "$_->[0]/$_->[1]" } farey(5)), '0/1 1/5 1/4 1/3 2/5 1/2 3/5 2/3 3/4 4/5 1/1', 'the Farey fractions up to fifths';
+    is scalar(my @f = farey(10)), 33, 'there are 1 + (sum of phi(k) for k up to 10) = 33 up to tenths';
+
+    my @fractions = farey(12);
+    my @wrong = grep { $fractions[ $_ + 1 ][0] * $fractions[$_][1] - $fractions[$_][0] * $fractions[ $_ + 1 ][1] != 1 } 0 .. $#fractions - 1;
+    is_deeply \@wrong, [], 'neighbors p/q < r/s always have rq - ps = 1';
+
+    my $gap = sub {
+        my ($c, $d) = map { ford_circle(@$_) } @_;
+        return sqrt(($c->[0] - $d->[0])**2 + ($c->[1] - $d->[1])**2) - $c->[2] - $d->[2];
+    };
+    @wrong = grep { abs($gap->(@fractions[ $_, $_ + 1 ])) > 1e-12 } 0 .. $#fractions - 1;
+    is_deeply \@wrong, [], 'so the circles of neighbors touch';
+    my @overlapping;
+    for my $i (0 .. $#fractions) {
+        push @overlapping, grep { $gap->(@fractions[ $i, $_ ]) < -1e-12 } $i + 1 .. $#fractions;
+    }
+    is_deeply \@overlapping, [], 'and no two circles ever overlap';
+    is_deeply ford_circle(1, 2), [ 0.5, 0.125, 0.125 ], 'each one sits on the line, radius 1/(2q^2)';
+};
+
 subtest 'pi_digits' => sub {
     my @digits = pi_digits(800);
     is scalar @digits, 800, 'as many digits as asked for';
@@ -708,7 +730,7 @@ subtest 'cmd_math with no piece lists the pieces' => sub {
     my $server = FakeServer->new;
     my $item   = FakeItem->new;
     cmd_math('', $server, $item);
-    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian buddhabrot burningship chladni clifford collatz dragon fern harmonograph hilbert julia koch langton life logistic lorenz lyapunov mandelbrot newton pascal phase piwalk rule30 sandpile seahorse spirograph sunflower timestable ulam zeta', 'CLIENTCRAP' ] ];
+    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian buddhabrot burningship chladni clifford collatz dragon fern ford harmonograph hilbert julia koch langton life logistic lorenz lyapunov mandelbrot newton pascal phase piwalk rule30 sandpile seahorse spirograph sunflower timestable ulam zeta', 'CLIENTCRAP' ] ];
     is_deeply $server->{sent}, [], 'nothing was sent';
 };
 
@@ -741,6 +763,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'collatz       the Collatz coral: every trip down to 1, bending left on even, right on odd',
             'dragon        the Heighway dragon, a strip of paper folded in half eight times',
             'fern          Barnsley\'s fern, grown from four random affine maps',
+            'ford          Ford circles: a circle on every fraction, and neighbors always touch',
             'harmonograph  two damped pendulums drawing on paper, spiraling in as they tire',
             'hilbert       the Hilbert curve, one line through all 256 squares of a grid',
             'julia         the Julia set called Douady\'s rabbit, ears within ears',
@@ -853,7 +876,7 @@ my @usage = (
 subtest 'cmd_math refuses bad input' => sub {
     my $item = FakeItem->new;
     cmd_math('nope', FakeServer->new, $item);
-    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian buddhabrot burningship chladni clifford collatz dragon fern harmonograph hilbert julia koch langton life logistic lorenz lyapunov mandelbrot newton pascal phase piwalk rule30 sandpile seahorse spirograph sunflower timestable ulam zeta', 'CLIENTERROR' ] ],
+    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian buddhabrot burningship chladni clifford collatz dragon fern ford harmonograph hilbert julia koch langton life logistic lorenz lyapunov mandelbrot newton pascal phase piwalk rule30 sandpile seahorse spirograph sunflower timestable ulam zeta', 'CLIENTERROR' ] ],
         'unknown piece';
 
     @printed = ();

@@ -999,6 +999,65 @@ sub lyapunov_canvas {
     return $canvas;
 }
 
+# The fractions from 0/1 to 1/1 in lowest terms with denominators up to $n,
+# in order, as [p, q]. Each one comes from the two before it: after a/b and
+# c/d, the next is (kc - a)/(kd - b) with k = floor((n + b) / d).
+sub farey {
+    my ($n) = @_;
+    my ($a, $b, $c, $d) = (0, 1, 1, $n);
+    my @fractions = ([ $a, $b ]);
+    while ($c <= $n) {
+        push @fractions, [ $c, $d ];
+        my $k = int(($n + $b) / $d);
+        ($a, $b, $c, $d) = ($c, $d, $k * $c - $a, $k * $d - $b);
+    }
+    return @fractions;
+}
+
+# Lester Ford's circle for p/q: it sits on the number line at p/q with
+# radius 1/(2q^2). Returns [x, y, radius] of its center.
+sub ford_circle {
+    my ($p, $q) = @_;
+    my $radius = 1 / (2 * $q * $q);
+    return [ $p / $q, $radius, $radius ];
+}
+
+# The fractions between 1/4 and 3/4 each get a circle, drawn as a glowing
+# ring, the color running from blue for the big ones down to red for the
+# dust along the line. Small denominators are rare and big ones common, so
+# the color goes by the log of the denominator to spread the hues out.
+# Denominators stop where the rings have shrunk to dots.
+my @FORD_HUES = (
+    [ 0,   0,   140, 255 ],
+    [ 0.3, 0,   255, 255 ],
+    [ 0.5, 0,   255, 0 ],
+    [ 0.7, 255, 255, 0 ],
+    [ 1,   255, 0,   0 ],
+);
+
+sub ford_canvas {
+    my $most   = 24;
+    my $scale  = 280;
+    my $pixel  = sub { [ 46 - $_[1] * $scale / 2, ($_[0] - 0.25) * $scale - 0.5 ] };
+    my @points;
+    for my $fraction (farey($most)) {
+        my ($x, $y, $radius) = @{ ford_circle(@$fraction) };
+        my $hue   = log($fraction->[1]) / log($most);
+        my $steps = List::Util::max(12, POSIX::ceil(4 * 3.14159 * $radius * $scale));
+        my @ring  = map {
+            my $angle = 8 * atan2(1, 1) * $_ / $steps;
+            $pixel->($x + $radius * cos($angle), $y + $radius * sin($angle));
+        } 0 .. $steps;
+        push @points, map { line_points(@ring[ $_ - 1, $_ ], $hue) } 1 .. $#ring;
+    }
+    my $canvas = glow_lines_canvas(\@points, \@FORD_HUES, 0.5);
+    put_text($canvas, 0, 1, 'Ford circles:',             97);
+    put_text($canvas, 1, 1, 'one on every fraction p/q', 94);
+    put_text($canvas, 2, 1, 'radius 1/(2q^2)',           94);
+    put_text($canvas, 3, 1, 'neighbors always touch',    94);
+    return $canvas;
+}
+
 # An elementary cellular automaton: a row of cells, each on or off, where the
 # next row's cell is decided by the cell above it and that cell's two
 # neighbors. Those three make a number from 0 to 7, and that bit of the rule
@@ -1973,6 +2032,7 @@ our %PIECES = (
     clifford   => { draw => \&clifford_canvas,   about => 'a Clifford strange attractor, drawn like smoke' },
     life       => { draw => \&life_canvas,       about => 'Conway\'s Game of Life: a glider gun firing gliders, with trails' },
     rule30     => { draw => \&rule30_canvas,     about => 'Wolfram\'s rule 30, one cell growing into chaos' },
+    ford       => { draw => \&ford_canvas,       about => 'Ford circles: a circle on every fraction, and neighbors always touch' },
     langton    => { draw => \&langton_canvas,    about => 'Langton\'s ant: ten thousand steps of mess, then out of nowhere a highway' },
     lyapunov   => { draw => \&lyapunov_canvas,   about => 'a Lyapunov fractal: where a logistic map flipping between two rates settles or turns to chaos' },
     sandpile   => { draw => \&sandpile_canvas,   about => 'the Abelian sandpile: grains dropped on one square, toppling in fours' },
