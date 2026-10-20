@@ -1921,22 +1921,83 @@ sub quasicrystal_canvas {
 # the corners as [x, y], starting at the origin heading east.
 sub gosper_path {
     my ($order) = @_;
-    my %rules = (A => 'A-B--B+A++AA+B-', B => '+A-BB--B-A++A+B');
-    my $moves = 'A';
-    $moves = join '', map { $rules{$_} // $_ } split //, $moves for 1 .. $order;
-    my $pi = 4 * atan2(1, 1);
+    my $moves = lsystem_moves('A', { A => 'A-B--B+A++AA+B-', B => '+A-BB--B-A++A+B' }, $order);
+    return ([ 0, 0 ], map { $_->[1] } turtle_segments($moves, 60));
+}
+
+# A Lindenmayer system: starting from $axiom, rewrite every symbol by its
+# rule in %$rules, all at once, $order times over. Symbols without a rule
+# stay as they are.
+sub lsystem_moves {
+    my ($axiom, $rules, $order) = @_;
+    my $moves = $axiom;
+    $moves = join '', map { $rules->{$_} // $_ } split //, $moves for 1 .. $order;
+    return $moves;
+}
+
+# Walks a turtle through an L-system's moves, starting at the origin heading
+# east: a letter steps forward one, + and - turn left and right by $turn
+# degrees, [ remembers where the turtle is and which way it faces, and ]
+# goes back there. Anything else does nothing. Returns each step as
+# [[x, y] from, [x, y] to, how many brackets deep it is].
+sub turtle_segments {
+    my ($moves, $turn) = @_;
+    my $radians = $turn * 4 * atan2(1, 1) / 180;
     my ($x, $y, $heading) = (0, 0, 0);
-    my @path = ([ 0, 0 ]);
+    my (@saved, @segments);
     for my $move (split //, $moves) {
-        if    ($move eq '+') { $heading++ }
-        elsif ($move eq '-') { $heading-- }
-        else {
-            $x += cos($heading * $pi / 3);
-            $y += sin($heading * $pi / 3);
-            push @path, [ $x, $y ];
+        if    ($move eq '+') { $heading += $radians }
+        elsif ($move eq '-') { $heading -= $radians }
+        elsif ($move eq '[') { push @saved, [ $x, $y, $heading ] }
+        elsif ($move eq ']') { ($x, $y, $heading) = @{ pop @saved } }
+        elsif ($move =~ /[A-Z]/) {
+            my @from = ($x, $y);
+            $x += cos $heading;
+            $y += sin $heading;
+            push @segments, [ \@from, [ $x, $y ], scalar @saved ];
         }
     }
-    return @path;
+    return @segments;
+}
+
+# The Levy C curve: every step replaced by two at right angles, bulging out
+# to the left, which is F -> +F--F+ with 45 degree turns. Returns its corners
+# as [x, y], starting at the origin heading east.
+sub levy_path {
+    my ($order) = @_;
+    return ([ 0, 0 ], map { $_->[1] } turtle_segments(lsystem_moves('F', { F => '+F--F+' }, $order), 45));
+}
+
+# Lindenmayer's fractal plant: X -> F+[[X]-X]-F[-X]+X and F -> FF with 25
+# degree turns. X is a bud that only shapes the growth, so it's taken out
+# before the turtle walks and the steps are all stems.
+sub plant_segments {
+    my ($order) = @_;
+    (my $stems = lsystem_moves('X', { X => 'F+[[X]-X]-F[-X]+X', F => 'FF' }, $order)) =~ tr/X//d;
+    return turtle_segments($stems, 25);
+}
+
+# A ball bouncing round inside the ellipse x^2/a^2 + y^2/b^2 = 1, starting
+# at the point $angle round it (a cos, b sin) and heading off at $direction
+# radians. Returns the start and the $count bounces after it as [x, y].
+sub ellipse_bounces {
+    my ($a, $b, $angle, $direction, $count) = @_;
+    my ($x, $y)   = ($a * cos $angle, $b * sin $angle);
+    my ($dx, $dy) = (cos $direction, sin $direction);
+    my @bounces = ([ $x, $y ]);
+    for (1 .. $count) {
+        # Along the line from a point on the ellipse, the other place it
+        # meets the ellipse is this far.
+        my $far = -2 * ($x * $dx / $a**2 + $y * $dy / $b**2) / ($dx**2 / $a**2 + $dy**2 / $b**2);
+        ($x, $y) = ($x + $far * $dx, $y + $far * $dy);
+        push @bounces, [ $x, $y ];
+        my ($nx, $ny) = ($x / $a**2, $y / $b**2);
+        my $length = sqrt($nx**2 + $ny**2);
+        ($nx, $ny) = ($nx / $length, $ny / $length);
+        my $across = $dx * $nx + $dy * $ny;
+        ($dx, $dy) = ($dx - 2 * $across * $nx, $dy - 2 * $across * $ny);
+    }
+    return @bounces;
 }
 
 # Order 3, 343 steps, its hue running along it. Order 4 packs its steps
@@ -2155,14 +2216,7 @@ sub double_pendulum {
             2 * sin($d) * (2 * $va**2 + 2 * cos($a) + $vb**2 * cos $d) / $below);
     };
     my @states = ([@$state]);
-    for (1 .. $steps) {
-        my @s  = @{ $states[-1] };
-        my @k1 = $slope->(@s);
-        my @k2 = $slope->(map { $s[$_] + $dt / 2 * $k1[$_] } 0 .. 3);
-        my @k3 = $slope->(map { $s[$_] + $dt / 2 * $k2[$_] } 0 .. 3);
-        my @k4 = $slope->(map { $s[$_] + $dt * $k3[$_] } 0 .. 3);
-        push @states, [ map { $s[$_] + $dt / 6 * ($k1[$_] + 2 * $k2[$_] + 2 * $k3[$_] + $k4[$_]) } 0 .. 3 ];
-    }
+    push @states, [ rk4_step($slope, $states[-1], $dt) ] for 1 .. $steps;
     return @states;
 }
 
@@ -3024,6 +3078,19 @@ sub pascal_canvas {
     return $canvas;
 }
 
+# One step of $dt along a system of differential equations by fourth-order
+# Runge-Kutta. $slope takes the state's numbers and returns how fast each one
+# is changing.
+sub rk4_step {
+    my ($slope, $state, $dt) = @_;
+    my @s  = @$state;
+    my @k1 = $slope->(@s);
+    my @k2 = $slope->(map { $s[$_] + $dt / 2 * $k1[$_] } 0 .. $#s);
+    my @k3 = $slope->(map { $s[$_] + $dt / 2 * $k2[$_] } 0 .. $#s);
+    my @k4 = $slope->(map { $s[$_] + $dt * $k3[$_] } 0 .. $#s);
+    return map { $s[$_] + $dt / 6 * ($k1[$_] + 2 * $k2[$_] + 2 * $k3[$_] + $k4[$_]) } 0 .. $#s;
+}
+
 # The Lorenz system, dx/dt = 10(y - x), dy/dt = x(28 - z) - y,
 # dz/dt = xy - 8z/3: a simplified model of convection that never settles and
 # never repeats, looping around two wings in an order nobody can predict.
@@ -3043,11 +3110,31 @@ sub lorenz_points {
     my @p      = (1, 1, 1);
     my @points;
     for my $step (1 .. $settle + $count) {
-        my @k1 = lorenz_velocity(@p);
-        my @k2 = lorenz_velocity(map { $p[$_] + $dt / 2 * $k1[$_] } 0 .. 2);
-        my @k3 = lorenz_velocity(map { $p[$_] + $dt / 2 * $k2[$_] } 0 .. 2);
-        my @k4 = lorenz_velocity(map { $p[$_] + $dt * $k3[$_] } 0 .. 2);
-        @p = map { $p[$_] + $dt / 6 * ($k1[$_] + 2 * $k2[$_] + 2 * $k3[$_] + $k4[$_]) } 0 .. 2;
+        @p = rk4_step(\&lorenz_velocity, \@p, $dt);
+        push @points, [@p] if $step > $settle;
+    }
+    return @points;
+}
+
+# The Rossler system, dx/dt = -y - z, dy/dt = x + 0.2y, dz/dt = 0.2 + z(x - 5.7):
+# a point spirals out round the z axis in the plane until x gets big enough
+# to fling it up, and it falls back in near the middle. It's chaos with a
+# single fold, simpler than Lorenz's two wings.
+sub rossler_velocity {
+    my ($x, $y, $z) = @_;
+    return (-$y - $z, $x + 0.2 * $y, 0.2 + $z * ($x - 5.7));
+}
+
+# $count points along the attractor, as [x, y, z], with the start dropped
+# the same way as lorenz_points.
+sub rossler_points {
+    my ($count) = @_;
+    my $dt     = 0.02;
+    my $settle = 3000;
+    my @p      = (1, 1, 0);
+    my @points;
+    for my $step (1 .. $settle + $count) {
+        @p = rk4_step(\&rossler_velocity, \@p, $dt);
         push @points, [@p] if $step > $settle;
     }
     return @points;

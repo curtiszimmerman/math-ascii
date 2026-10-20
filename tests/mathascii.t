@@ -941,6 +941,118 @@ subtest 'rotation_number' => sub {
     is locked_denominator(0.3183, 8), undef, 'an unlocked rotation has no small denominator';
 };
 
+subtest 'rk4_step' => sub {
+    my $pi = 4 * atan2(1, 1);
+    my ($grown) = rk4_step(sub { @_ }, [1], 0.1);
+    ok abs($grown - exp 0.1) < 1e-6, 'growing at its own size, a step of 0.1 multiplies by about e^0.1';
+    my @spring = (1, 0);
+    @spring = rk4_step(sub { ($_[1], -$_[0]) }, \@spring, $pi / 1000) for 1 .. 2000;
+    ok abs($spring[0] - 1) < 1e-8 && abs($spring[1]) < 1e-8, 'a spring comes back where it started after 2 pi';
+};
+
+subtest 'rossler_points' => sub {
+    my @points = rossler_points(6000);
+    is scalar @points, 6000, 'one point per step';
+    is_deeply [ grep { abs($_->[0]) > 13 || abs($_->[1]) > 13 || $_->[2] < 0 || $_->[2] > 25 } @points ], [],
+        'the trajectory stays inside the attractor\'s bounding box';
+    ok((grep { $_->[2] > 5 } @points), 'and every so often it flies up out of the plane');
+    my @backwards = grep {
+        my ($x, $y, $z) = @{ $points[$_] };
+        my $turning = $x * ($points[ $_ + 1 ][1] - $y) - $y * ($points[ $_ + 1 ][0] - $x);
+        $z < 1 && $turning <= 0;
+    } 0 .. $#points - 1;
+    is_deeply \@backwards, [], 'down in the plane it always circles the z axis counterclockwise';
+};
+
+# Rounds the numbers in a nested list, so a turtle's cos(90 degrees) of
+# 6e-17 compares equal to 0.
+sub rounded {
+    my ($value) = @_;
+    return ref $value ? [ map { rounded($_) } @$value ] : 0 + sprintf '%.9f', $value;
+}
+
+subtest 'lsystem_moves' => sub {
+    my @words = map { lsystem_moves('A', { A => 'AB', B => 'A' }, $_) } 0 .. 5;
+    is_deeply \@words, [qw(A AB ABA ABAAB ABAABABA ABAABABAABAAB)], 'Lindenmayer\'s algae: each word is the last two joined';
+    is lsystem_moves('F+F', { F => 'FF' }, 2), 'FFFF+FFFF', 'symbols without a rule are kept';
+};
+
+subtest 'turtle_segments' => sub {
+    is_deeply rounded([ turtle_segments('F+F', 90) ]), [ [ [ 0, 0 ], [ 1, 0 ], 0 ], [ [ 1, 0 ], [ 1, 1 ], 0 ] ],
+        'a step east, a quarter turn left, and a step north';
+    is_deeply rounded([ turtle_segments('F[+F]-F', 90) ]),
+        [ [ [ 0, 0 ], [ 1, 0 ], 0 ], [ [ 1, 0 ], [ 1, 1 ], 1 ], [ [ 1, 0 ], [ 1, -1 ], 0 ] ],
+        'a branch in brackets goes off and the turtle comes back to where and how it started it';
+    is_deeply rounded([ turtle_segments('A-B', 60) ]), rounded([ [ [ 0, 0 ], [ 1, 0 ], 0 ], [ [ 1, 0 ], [ 1.5, -sqrt(3) / 2 ], 0 ] ]),
+        'any letter steps forward';
+};
+
+subtest 'levy_path' => sub {
+    my $pi = 4 * atan2(1, 1);
+    for my $order (2, 5, 8) {
+        my @path = levy_path($order);
+        is scalar @path, 2**$order + 1, "order $order is 2^$order steps";
+        my @odd = grep {
+            my ($dx, $dy) = ($path[$_][0] - $path[ $_ - 1 ][0], $path[$_][1] - $path[ $_ - 1 ][1]);
+            my $eighths = atan2($dy, $dx) / ($pi / 4);
+            abs(sqrt($dx**2 + $dy**2) - 1) > 1e-9 || abs($eighths - POSIX::floor($eighths + 0.5)) > 1e-9;
+        } 1 .. $#path;
+        is_deeply \@odd, [], 'every step is one long and heads along a multiple of 45 degrees';
+        ok abs($path[-1][0] - sqrt(2)**$order) < 1e-9 && abs($path[-1][1]) < 1e-9, 'each order ends sqrt(2) times further east';
+        my @unmirrored = grep { abs($path[$_][0] + $path[ -1 - $_ ][0] - $path[-1][0]) > 1e-9 || abs($path[$_][1] - $path[ -1 - $_ ][1]) > 1e-9 } 0 .. $#path;
+        is_deeply \@unmirrored, [], 'and its two halves are mirror images';
+    }
+};
+
+subtest 'plant_segments' => sub {
+    my $pi = 4 * atan2(1, 1);
+    for my $order (1 .. 4) {
+        my @segments = plant_segments($order);
+        is scalar @segments, 2**$order * (2**$order - 1), "order $order has 2^$order (2^$order - 1) steps";
+        is_deeply rounded([ map { $_->[1] } @segments[ 0 .. 2**($order - 1) - 1 ] ]), [ map { [ $_, 0 ] } 1 .. 2**($order - 1) ],
+            'starting with a straight stem half as long as the plant is wide in steps';
+        my @odd = grep {
+            my ($dx, $dy) = ($_->[1][0] - $_->[0][0], $_->[1][1] - $_->[0][1]);
+            my $turns = atan2($dy, $dx) / ($pi * 25 / 180);
+            abs(sqrt($dx**2 + $dy**2) - 1) > 1e-9 || abs($turns - POSIX::floor($turns + 0.5)) > 1e-9;
+        } @segments;
+        is_deeply \@odd, [], 'every step is one long, at a multiple of 25 degrees';
+    }
+};
+
+subtest 'ellipse_bounces' => sub {
+    my $pi = 4 * atan2(1, 1);
+    my ($a, $b) = (2, 1.2);
+    my @bounces = ellipse_bounces($a, $b, 0.4, 2.1, 200);
+    is scalar @bounces, 201, 'the start and every bounce';
+    is_deeply [ grep { abs($_->[0]**2 / $a**2 + $_->[1]**2 / $b**2 - 1) > 1e-9 } @bounces ], [], 'all on the ellipse';
+    is_deeply rounded($bounces[0]), rounded([ $a * cos 0.4, $b * sin 0.4 ]), 'starting where it was asked to';
+
+    my $unit = sub { my ($from, $to) = @_; my ($dx, $dy) = ($to->[0] - $from->[0], $to->[1] - $from->[1]); my $l = sqrt($dx**2 + $dy**2); [ $dx / $l, $dy / $l ] };
+    my @unequal = grep {
+        my ($in, $out) = ($unit->(@bounces[ $_ - 1, $_ ]), $unit->(@bounces[ $_, $_ + 1 ]));
+        my ($x, $y) = @{ $bounces[$_] };
+        my @tangent = (-$y / $b**2, $x / $a**2);
+        abs(($in->[0] * $tangent[0] + $in->[1] * $tangent[1]) - ($out->[0] * $tangent[0] + $out->[1] * $tangent[1])) > 1e-9;
+    } 1 .. 199;
+    is_deeply \@unequal, [], 'each bounce leaves at the angle it came in at';
+
+    # The angular momenta about the two foci multiply to the same number on
+    # every chord, which is why the chords all touch one smaller ellipse.
+    my $focus    = sqrt($a**2 - $b**2);
+    my $momentum = sub {
+        my ($k) = @_;
+        my $d = $unit->(@bounces[ $k, $k + 1 ]);
+        my ($x, $y) = @{ $bounces[$k] };
+        return (($x - $focus) * $d->[1] - $y * $d->[0]) * (($x + $focus) * $d->[1] - $y * $d->[0]);
+    };
+    my $first = $momentum->(0);
+    is_deeply [ grep { abs($momentum->($_) - $first) > 1e-9 } 1 .. 199 ], [], 'the product of the momenta about the foci never changes';
+
+    is_deeply rounded([ ellipse_bounces($a, $b, 0, $pi, 3) ]), [ [ 2, 0 ], [ -2, 0 ], [ 2, 0 ], [ -2, 0 ] ],
+        'shot along the long axis it bounces straight back and forth';
+};
+
 subtest 'pi_digits' => sub {
     my @digits = pi_digits(800);
     is scalar @digits, 800, 'as many digits as asked for';
