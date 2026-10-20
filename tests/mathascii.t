@@ -1451,7 +1451,7 @@ subtest 'cmd_math with no piece lists the pieces' => sub {
     my $server = FakeServer->new;
     my $item   = FakeItem->new;
     cmd_math('', $server, $item);
-    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian billiard buddhabrot burningship butterfly cantor chladni clifford clothoid collatz conformal cycloid dragon drum elephant fern fibword ford fourier golden gosper harmonograph hilbert hopf hyperbolic julia kepler knot koch langton levy life logistic lorenz lyapunov mandelbrot maurer mobius newton pascal pendulum penrose phase piwalk plant pythagoras quasicrystal recaman ripples rossler rule30 sandpile seahorse spirograph steiner sunflower tesseract theodorus threebody timestable tongues tricorn truchet ulam voronoi weierstrass zeta', 'CLIENTCRAP' ] ];
+    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian billiard buddhabrot burningship butterfly cantor chladni clifford clothoid collatz conformal cycloid dipole dragon drum elephant euler fern fibword ford fourier golden gosper harmonograph hilbert hopf hyperbolic julia kepler knot koch langton levy life logistic lorenz lyapunov mandelbrot maurer minibrot mobius newton pascal pendulum penrose phase piwalk plant pursuit pythagoras quasicrystal recaman ripples rossler rule30 sandpile seahorse spirograph steiner sunflower tesseract theodorus threebody timestable tongues tricorn truchet ulam voronoi weierstrass zeta', 'CLIENTCRAP' ] ];
     is_deeply $server->{sent}, [], 'nothing was sent';
 };
 
@@ -1488,9 +1488,11 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'collatz       the Collatz coral: every trip down to 1, bending left on even, right on odd',
             'conformal     a square grid under w = sin z, bent but still square at every crossing',
             'cycloid       the fastest way down: beads racing on a line, a sine and a cycloid',
+            'dipole        the field lines of a positive and a negative charge',
             'dragon        the Heighway dragon, a strip of paper folded in half eight times',
             'drum          a round drum ringing in two of its modes, with the lines that hold still',
             'elephant      Elephant Valley in the Mandelbrot set, trunks and all',
+            'euler         Euler\'s identity: (1 + i pi/n)^n walking round to -1 as n grows',
             'fern          Barnsley\'s fern, grown from four random affine maps',
             'fibword       the Fibonacci word fractal: a turn after every 0 in 0100101001001...',
             'ford          Ford circles: a circle on every fraction, and neighbors always touch',
@@ -1513,6 +1515,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'lyapunov      a Lyapunov fractal: where a logistic map flipping between two rates settles or turns to chaos',
             'mandelbrot    the whole Mandelbrot set, glowing toward its edge',
             'maurer        a Maurer rose: a walk round a rose in steps of 71 degrees',
+            'minibrot      a tiny copy of the Mandelbrot set, out on its needle',
             'mobius        a Mobius strip: a band with a half twist, so it has one side and one edge',
             'newton        Newton\'s method on z^3 - 1, three basins with a fractal border',
             'pascal        Pascal\'s triangle mod 2, which turns out to be Sierpinski\'s',
@@ -1521,6 +1524,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'phase         a phase portrait: zeros and poles of a complex function as color pinwheels',
             'piwalk        a walk steered by the first thousand digits of pi',
             'plant         Lindenmayer\'s fractal plant, grown by rewriting a string of turtle moves',
+            'pursuit       four bugs at the corners of a square, each chasing the next into a whirl',
             'pythagoras    the Pythagoras tree: squares on the sides of right triangles, branching forever',
             'quasicrystal  seven waves added up into a pattern that never repeats',
             'recaman       Recaman\'s sequence: hop back if you can, forward if you can\'t, drawn as arcs',
@@ -1663,7 +1667,7 @@ my @usage = (
 subtest 'cmd_math refuses bad input' => sub {
     my $item = FakeItem->new;
     cmd_math('nope', FakeServer->new, $item);
-    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian billiard buddhabrot burningship butterfly cantor chladni clifford clothoid collatz conformal cycloid dragon drum elephant fern fibword ford fourier golden gosper harmonograph hilbert hopf hyperbolic julia kepler knot koch langton levy life logistic lorenz lyapunov mandelbrot maurer mobius newton pascal pendulum penrose phase piwalk plant pythagoras quasicrystal recaman ripples rossler rule30 sandpile seahorse spirograph steiner sunflower tesseract theodorus threebody timestable tongues tricorn truchet ulam voronoi weierstrass zeta', 'CLIENTERROR' ] ],
+    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian billiard buddhabrot burningship butterfly cantor chladni clifford clothoid collatz conformal cycloid dipole dragon drum elephant euler fern fibword ford fourier golden gosper harmonograph hilbert hopf hyperbolic julia kepler knot koch langton levy life logistic lorenz lyapunov mandelbrot maurer minibrot mobius newton pascal pendulum penrose phase piwalk plant pursuit pythagoras quasicrystal recaman ripples rossler rule30 sandpile seahorse spirograph steiner sunflower tesseract theodorus threebody timestable tongues tricorn truchet ulam voronoi weierstrass zeta', 'CLIENTERROR' ] ],
         'unknown piece';
 
     @printed = ();

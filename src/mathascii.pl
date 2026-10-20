@@ -2073,6 +2073,76 @@ sub pursuit_polygons {
     return @polygons;
 }
 
+# (1 + i pi/n)^n walked out power by power for a few n, each its own hue.
+# With few steps the walk overshoots and grows; with more it hugs the unit
+# circle and ends at -1, marked in white.
+sub euler_canvas {
+    my @steps = (2, 3, 5, 10, 50);
+    my @paths = map { [ euler_power_path($_) ] } @steps;
+    my $pixel = fit_to_frame([ map {@$_} @paths ]);
+    my @rgb   = map { [ map { [ 0, 0, 0 ] } 1 .. 140 ] } 1 .. 48;
+    for my $k (0 .. $#paths) {
+        my $path = $paths[$k];
+        draw_glow_curve(\@rgb, [ map { line_points($pixel->(@{ $path->[ $_ - 1 ] }), $pixel->(@{ $path->[$_] }), $k / $#paths) } 1 .. $#$path ], \@ZETA_HUES, 0.5);
+    }
+    paint_points(\@rgb, [ $pixel->(-1, 0) ], [ 255, 255, 255 ]);
+    my @palette = (gradient_palette(\@ZETA_HUES), $BLACK, 98);
+    my $canvas  = pixels_to_canvas([ map { [ map { nearest_color_in(\@palette, @$_) } @$_ ] } @rgb ]);
+    put_text($canvas, 0, 1, '(1 + i pi/n)^n', 97);
+    put_text($canvas, 1, 1, 'n = 2, 3, 5,',   94);
+    put_text($canvas, 2, 1, '10 and 50',      94);
+    put_text($canvas, 3, 1, 'comes to -1',    94);
+    return $canvas;
+}
+
+# The field lines of the two charges, leaving the positive one on the left
+# every 22.5 degrees. Lines that leave facing away loop wide and some run out
+# of the frame. Their hue goes by the angle they leave at, and the charges
+# are a red and a blue dot.
+sub dipole_canvas {
+    my ($lines, $scale) = (16, 24);
+    my $pi     = 4 * atan2(1, 1);
+    my @rgb    = map { [ map { [ 0, 0, 0 ] } 1 .. 140 ] } 1 .. 48;
+    my @points = map {
+        my $angle = 2 * $pi * ($_ + 0.5) / $lines;
+        my $hue   = abs(atan2(sin $angle, cos $angle)) / $pi;
+        my @line  = map { centered_pixel(@$_, $scale) } field_line($angle);
+        map { line_points(@line[ $_ - 1, $_ ], $hue) } 1 .. $#line;
+    } 0 .. $lines - 1;
+    draw_glow_curve(\@rgb, \@points, \@ZETA_HUES, 0.5);
+    for my $charge ([ -1, [ 255, 0, 0 ] ], [ 1, [ 0, 0, 255 ] ]) {
+        my $at = centered_pixel($charge->[0], 0, $scale);
+        paint_points(\@rgb, [ map { my $dc = $_; map { [ $at->[0] + $_, $at->[1] + $dc ] } 0, 1 } -1 .. 2 ], $charge->[1]);
+    }
+    my @palette = (gradient_palette(\@ZETA_HUES), $BLACK, 52, 60);
+    my $canvas  = pixels_to_canvas([ map { [ map { nearest_color_in(\@palette, @$_) } @$_ ] } @rgb ]);
+    put_text($canvas, 0, 1, 'the field of a +', 97);
+    put_text($canvas, 1, 1, 'and a - charge',   97);
+    return $canvas;
+}
+
+# Four bugs chasing each other in from the corners of a square. Between one
+# step's square and the next are four thin corner triangles. They're filled
+# in a hue that changes as the square shrinks, every other corner dimmer, so
+# the corners each bug cuts line up into the four arms of a whirl.
+sub pursuit_canvas {
+    my ($fraction, $steps) = (0.1, 40);
+    my @squares = pursuit_polygons(4, $fraction, $steps);
+    my @rgb     = map { [ map { [ 0, 0, 0 ] } 1 .. 140 ] } 1 .. 48;
+    for my $k (0 .. $steps - 1) {
+        my @hue = gradient_rgb(\@ZETA_HUES, $k / $steps);
+        for my $i (0 .. 3) {
+            my @corner = ($squares[ $k + 1 ][$i], $squares[$k][ ($i + 1) % 4 ], $squares[ $k + 1 ][ ($i + 1) % 4 ]);
+            fill_polygon(\@rgb, [ map { centered_pixel(@$_, 44) } @corner ], [ map { $i % 2 ? $_ * 0.45 : $_ } @hue ]);
+        }
+    }
+    my $canvas = pixels_to_canvas([ map { [ map { nearest_color(@$_) } @$_ ] } @rgb ]);
+    put_text($canvas, 0, 1, 'four bugs,',        97);
+    put_text($canvas, 1, 1, 'each chasing',      94);
+    put_text($canvas, 2, 1, 'the next',          94);
+    return $canvas;
+}
+
 # A Mobius strip: a band round the unit circle that makes half a twist as it
 # goes. $u is how far round (in radians) and $v how far across from the
 # middle of the band. Returns [x, y, z].
@@ -3636,6 +3706,20 @@ sub mandelbrot_canvas {
     return $canvas;
 }
 
+# The biggest copy of the whole set on the needle out to the left, the one
+# whose center 0 comes back to after three steps. The view sits a little left
+# of that center to fit in the copy's own needle.
+sub minibrot_canvas {
+    my ($center) = mandelbrot_nucleus(-1.75, 0, 3);
+    my $canvas = mandelbrot_view(
+        center_x  => $center - 0.0136, center_y  => 0, half_height => 0.028,
+        max_steps => 1000,             glow_from => 4, glow_to     => 120,
+    );
+    put_text($canvas, 0, 1, 'a copy of the set',                    97);
+    put_text($canvas, 1, 1, sprintf('around c = %.5f', $center), 94);
+    return $canvas;
+}
+
 # Seahorse Valley is the crack between the main cardioid and the big bulb to
 # its left, where the boundary curls into spirals that look like seahorse
 # tails. This frames one tail about 600 times closer than the full view.
@@ -3722,6 +3806,10 @@ our %PIECES = (
     steiner    => { draw => \&steiner_canvas,    about => 'a Steiner chain: a ring of circles that fits however far you turn it' },
     kepler     => { draw => \&kepler_canvas,     about => 'Kepler\'s second law: an orbit cut into months that all sweep the same area' },
     fibword    => { draw => \&fibword_canvas,    about => 'the Fibonacci word fractal: a turn after every 0 in 0100101001001...' },
+    minibrot   => { draw => \&minibrot_canvas,   about => 'a tiny copy of the Mandelbrot set, out on its needle' },
+    euler      => { draw => \&euler_canvas,      about => 'Euler\'s identity: (1 + i pi/n)^n walking round to -1 as n grows' },
+    dipole     => { draw => \&dipole_canvas,     about => 'the field lines of a positive and a negative charge' },
+    pursuit    => { draw => \&pursuit_canvas,    about => 'four bugs at the corners of a square, each chasing the next into a whirl' },
     hopf       => { draw => \&hopf_canvas,       about => 'the Hopf fibration: circles on a doughnut, every one linked through every other' },
     burningship => { draw => \&burningship_canvas, about => 'the Burning Ship fractal, z^2 + c with the orbit folded' },
     dragon     => { draw => \&dragon_canvas,     about => 'the Heighway dragon, a strip of paper folded in half eight times' },
