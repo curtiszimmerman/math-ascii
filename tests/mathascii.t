@@ -888,6 +888,59 @@ subtest 'theodorus_points' => sub {
     ok abs($last - ($total[15] - 2 * $pi)) < 1e-9, 'which is where the points are';
 };
 
+subtest 'brachistochrone' => sub {
+    my $pi       = 4 * atan2(1, 1);
+    my @line     = map { [ $pi * $_ / 100, -2 * $_ / 100 ] } 0 .. 100;
+    my @times    = curve_times(\@line);
+    ok abs($times[-1] - sqrt($pi**2 + 4)) < 1e-9, 'sliding down a straight line takes its length times sqrt(2 / gh)';
+    is_deeply [ grep { $times[$_] <= $times[ $_ - 1 ] } 1 .. $#times ], [], 'and the times only go up';
+
+    my @cycloid = cycloid_points(0, 20000);
+    ok abs((curve_times(\@cycloid))[-1] - $pi) < 1e-3, 'down the cycloid it takes pi, less than the line';
+    ok abs((curve_times([ cycloid_points(1.2, 20000) ]))[-1] - $pi) < 1e-3, 'let go from partway down, it still takes pi to reach the bottom';
+    ok abs((curve_times([ cycloid_points(2.5, 20000) ]))[-1] - $pi) < 1e-3, 'wherever you let go';
+};
+
+subtest 'double_pendulum' => sub {
+    my $pi     = 4 * atan2(1, 1);
+    my $energy = sub {
+        my ($a, $b, $va, $vb) = @{ $_[0] };
+        return $va**2 + $vb**2 / 2 + $va * $vb * cos($a - $b) - 2 * cos($a) - cos($b);
+    };
+    my @swing = double_pendulum([ 2, 2, 0, 0 ], 20, 20000);
+    is scalar @swing, 20001, 'a state for every step and the start';
+    ok abs($energy->($swing[-1]) - $energy->($swing[0])) < 1e-6, 'energy is kept, even swinging wildly';
+    is_deeply [ double_pendulum([ 0, 0, 0, 0 ], 1, 10) ]->[-1], [ 0, 0, 0, 0 ], 'hanging still it stays still';
+
+    # Swinging a little with the lower arm sqrt(2) times as far out as the
+    # upper, both arms move together at one frequency.
+    my $small  = 0.001;
+    my $period = 2 * $pi / sqrt(2 - sqrt 2);
+    my $back   = (double_pendulum([ $small, sqrt(2) * $small, 0, 0 ], $period, 20000))[-1];
+    ok abs($back->[0] - $small) < 1e-8 && abs($back->[1] - sqrt(2) * $small) < 1e-8, 'small swings in step come back after 2 pi / sqrt(2 - sqrt 2)';
+};
+
+subtest 'butterfly_point' => sub {
+    my ($x, $y) = @{ butterfly_point(1.3) };
+    my $r = exp(cos 1.3) - 2 * cos(4 * 1.3) - sin(1.3 / 12)**5;
+    ok abs($x - sin(1.3) * $r) < 1e-12 && abs($y - cos(1.3) * $r) < 1e-12, 'r = e^cos t - 2 cos 4t - sin^5(t / 12), as x = r sin t, y = r cos t';
+    my ($start, $end) = (butterfly_point(0), butterfly_point(96 * atan2(1, 1)));
+    ok abs($start->[0] - $end->[0]) < 1e-9 && abs($start->[1] - $end->[1]) < 1e-9, 'it closes up after twelve turns';
+};
+
+subtest 'rotation_number' => sub {
+    ok abs(rotation_number(0.3, 0) - 0.3) < 1e-9, 'without the kick the circle just turns by omega each step';
+    ok abs(rotation_number(0.1, 0.9)) < 1e-6, 'a strong kick locks a small turn to none at all';
+    ok abs(rotation_number(0.5, 0.9) - 0.5) < 1e-6, 'and half a turn stays locked at half';
+    ok abs(rotation_number(0.345, 0.9) - 1 / 3) < 1e-6, 'and a little over a third at a third';
+    ok abs(rotation_number(1 / 3, 0.9) - 1 / 3) > 1e-3, 'but the kick has pushed that tongue off a third itself';
+    my @rising = map { rotation_number($_ / 20, 0.6) } 0 .. 20;
+    is_deeply [ grep { $rising[$_] < $rising[ $_ - 1 ] - 1e-9 } 1 .. 20 ], [], 'more turn never means less rotation';
+    is locked_denominator(rotation_number(0.345, 0.9), 8), 3, 'a third is locked with denominator 3';
+    is locked_denominator(0.5, 8), 2, 'a half with 2';
+    is locked_denominator(0.3183, 8), undef, 'an unlocked rotation has no small denominator';
+};
+
 subtest 'pi_digits' => sub {
     my @digits = pi_digits(800);
     is scalar @digits, 800, 'as many digits as asked for';
@@ -1162,7 +1215,7 @@ subtest 'cmd_math with no piece lists the pieces' => sub {
     my $server = FakeServer->new;
     my $item   = FakeItem->new;
     cmd_math('', $server, $item);
-    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian buddhabrot burningship cantor chladni clifford clothoid collatz conformal dragon drum elephant fern ford fourier golden gosper harmonograph hilbert hopf hyperbolic julia knot koch langton life logistic lorenz lyapunov mandelbrot maurer newton pascal penrose phase piwalk pythagoras quasicrystal recaman ripples rule30 sandpile seahorse spirograph sunflower tesseract theodorus threebody timestable tricorn truchet ulam voronoi weierstrass zeta', 'CLIENTCRAP' ] ];
+    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian buddhabrot burningship butterfly cantor chladni clifford clothoid collatz conformal cycloid dragon drum elephant fern ford fourier golden gosper harmonograph hilbert hopf hyperbolic julia knot koch langton life logistic lorenz lyapunov mandelbrot maurer newton pascal pendulum penrose phase piwalk pythagoras quasicrystal recaman ripples rule30 sandpile seahorse spirograph sunflower tesseract theodorus threebody timestable tongues tricorn truchet ulam voronoi weierstrass zeta', 'CLIENTCRAP' ] ];
     is_deeply $server->{sent}, [], 'nothing was sent';
 };
 
@@ -1190,12 +1243,14 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'apollonian    the Apollonian gasket, every gap between circles filled with another circle',
             'buddhabrot    the Buddhabrot: the paths of every point that escapes the Mandelbrot set',
             'burningship   the Burning Ship fractal, z^2 + c with the orbit folded',
+            'butterfly     Fay\'s butterfly curve, twelve turns of a polar curve',
             'cantor        the devil\'s staircase, climbing only on the Cantor set',
             'chladni       sand on a ringing metal plate, gathered on the lines that stand still',
             'clifford      a Clifford strange attractor, drawn like smoke',
             'clothoid      the Euler spiral, which bends more the further along it you go',
             'collatz       the Collatz coral: every trip down to 1, bending left on even, right on odd',
             'conformal     a square grid under w = sin z, bent but still square at every crossing',
+            'cycloid       the fastest way down: beads racing on a line, a sine and a cycloid',
             'dragon        the Heighway dragon, a strip of paper folded in half eight times',
             'drum          a round drum ringing in two of its modes, with the lines that hold still',
             'elephant      Elephant Valley in the Mandelbrot set, trunks and all',
@@ -1220,6 +1275,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'maurer        a Maurer rose: a walk round a rose in steps of 71 degrees',
             'newton        Newton\'s method on z^3 - 1, three basins with a fractal border',
             'pascal        Pascal\'s triangle mod 2, which turns out to be Sierpinski\'s',
+            'pendulum      a double pendulum swinging wildly for thirty seconds',
             'penrose       a Penrose tiling: two rhombs covering the plane without ever repeating',
             'phase         a phase portrait: zeros and poles of a complex function as color pinwheels',
             'piwalk        a walk steered by the first thousand digits of pi',
@@ -1236,6 +1292,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'theodorus     the spiral of Theodorus: right triangles with sides sqrt 2, sqrt 3, ... sqrt 17',
             'threebody     three bodies chasing each other round a figure eight under gravity',
             'timestable    times tables drawn on a circle, where a cardioid and a nephroid appear',
+            'tongues       Arnold tongues: where a kicked circle locks onto a fraction of a turn',
             'tricorn       the Tricorn, the Mandelbrot set\'s rule with z flipped to its conjugate',
             'truchet       Truchet tiles: quarter circles laid at random, joining into endless paths',
             'ulam          the Ulam spiral, where the primes line up on diagonals',
@@ -1362,7 +1419,7 @@ my @usage = (
 subtest 'cmd_math refuses bad input' => sub {
     my $item = FakeItem->new;
     cmd_math('nope', FakeServer->new, $item);
-    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian buddhabrot burningship cantor chladni clifford clothoid collatz conformal dragon drum elephant fern ford fourier golden gosper harmonograph hilbert hopf hyperbolic julia knot koch langton life logistic lorenz lyapunov mandelbrot maurer newton pascal penrose phase piwalk pythagoras quasicrystal recaman ripples rule30 sandpile seahorse spirograph sunflower tesseract theodorus threebody timestable tricorn truchet ulam voronoi weierstrass zeta', 'CLIENTERROR' ] ],
+    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian buddhabrot burningship butterfly cantor chladni clifford clothoid collatz conformal cycloid dragon drum elephant fern ford fourier golden gosper harmonograph hilbert hopf hyperbolic julia knot koch langton life logistic lorenz lyapunov mandelbrot maurer newton pascal pendulum penrose phase piwalk pythagoras quasicrystal recaman ripples rule30 sandpile seahorse spirograph sunflower tesseract theodorus threebody timestable tongues tricorn truchet ulam voronoi weierstrass zeta', 'CLIENTERROR' ] ],
         'unknown piece';
 
     @printed = ();

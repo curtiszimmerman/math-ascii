@@ -2074,6 +2074,181 @@ sub theodorus_canvas {
     return $canvas;
 }
 
+# How long a bead takes to reach each of the [x, y] points of a wire, sliding
+# without friction from rest at the first one, with gravity 1 pulling down.
+# Its speed at any point is sqrt(2 g drop). Along a short straight piece the
+# pull is steady, so the time is the length over the average of the speeds at
+# its ends, which is exact even for the first piece where it starts at rest.
+sub curve_times {
+    my ($points) = @_;
+    my $top   = $points->[0][1];
+    my $speed = sub { sqrt(List::Util::max(0, 2 * ($top - $_[0][1]))) };
+    my @times = (0);
+    for my $i (1 .. $#$points) {
+        my ($from, $to) = @$points[ $i - 1, $i ];
+        push @times, $times[-1] + 2 * sqrt(($to->[0] - $from->[0])**2 + ($to->[1] - $from->[1])**2) / ($speed->($from) + $speed->($to));
+    }
+    return @times;
+}
+
+# The cycloid traced by a point on a rolling wheel of radius 1, upside down,
+# from the angle $start round to the bottom at pi, in $steps steps. It's the
+# brachistochrone, the fastest slide from its top to its bottom, and the
+# tautochrone too: let go anywhere on it and the bead takes the same time,
+# pi, to reach the bottom.
+sub cycloid_points {
+    my ($start, $steps) = @_;
+    my $pi = 4 * atan2(1, 1);
+    return map { my $angle = $start + ($pi - $start) * $_ / $steps; [ $angle - sin $angle, cos($angle) - 1 ] } 0 .. $steps;
+}
+
+# Three wires from the same top to the same bottom: a straight line, a sine
+# curve that drops steeply at first, and the cycloid. White dots show where a
+# bead on each is every sixth of pi seconds, so the cycloid's beads are ahead
+# all the way down.
+my @BRACHISTOCHRONE_HUES = ([ 0, 0, 140, 255 ], [ 0.5, 0, 255, 160 ], [ 1, 255, 150, 0 ]);
+
+sub cycloid_canvas {
+    my $pi    = 4 * atan2(1, 1);
+    my $steps = 600;
+    my @wires = (
+        [ map { [ $pi * $_ / $steps, -2 * $_ / $steps ] } 0 .. $steps ],
+        [ map { my $x = $pi * $_ / $steps; [ $x, -2 * sin($x / 2) ] } 0 .. $steps ],
+        [ cycloid_points(0, $steps) ],
+    );
+    my $pixel = fit_to_frame([ map {@$_} @wires ]);
+    my @rgb   = map { [ map { [ 0, 0, 0 ] } 1 .. 140 ] } 1 .. 48;
+    for my $i (0 .. 2) {
+        draw_glow_curve(\@rgb, [ map { [ @{ $pixel->(@$_) }, $i / 2 ] } @{ $wires[$i] } ], \@BRACHISTOCHRONE_HUES, 0.6);
+    }
+    for my $wire (@wires) {
+        my @times = curve_times($wire);
+        for my $tick (0 .. 6) {
+            my $at = List::Util::first { $times[$_] >= $tick * $pi / 6 } 0 .. $#times;
+            next if !defined $at;
+            my ($row, $col) = @{ $pixel->(@{ $wire->[$at] }) };
+            paint_points(\@rgb, [ map { my $dr = $_; map { [ $row + $dr, $col + $_ ] } -1, 0, 1 } 0, 0.6 ], [ 255, 255, 255 ]);
+        }
+    }
+    my @palette = (gradient_palette(\@BRACHISTOCHRONE_HUES), $BLACK, 98);
+    my $canvas  = pixels_to_canvas([ map { [ map { nearest_color_in(\@palette, @$_) } @$_ ] } @rgb ]);
+    put_text($canvas, 19, 1, 'which way down is fastest?', 97);
+    put_text($canvas, 20, 1, 'a straight line, a sine,',   94);
+    put_text($canvas, 21, 1, 'or the cycloid, which wins', 94);
+    put_text($canvas, 22, 1, '(dots every pi/6 seconds)',  94);
+    return $canvas;
+}
+
+# A double pendulum, two equal arms of length 1 with equal weights, gravity
+# 1. The state is [upper angle, lower angle, their angular speeds], angles
+# from straight down. Steps it along for $time in $steps steps of the
+# classic fourth order Runge-Kutta method and returns every state.
+sub double_pendulum {
+    my ($state, $time, $steps) = @_;
+    my $dt    = $time / $steps;
+    my $slope = sub {
+        my ($a, $b, $va, $vb) = @_;
+        my $d     = $a - $b;
+        my $below = 3 - cos(2 * $d);
+        return ($va, $vb,
+            (-3 * sin($a) - sin($a - 2 * $b) - 2 * sin($d) * ($vb**2 + $va**2 * cos $d)) / $below,
+            2 * sin($d) * (2 * $va**2 + 2 * cos($a) + $vb**2 * cos $d) / $below);
+    };
+    my @states = ([@$state]);
+    for (1 .. $steps) {
+        my @s  = @{ $states[-1] };
+        my @k1 = $slope->(@s);
+        my @k2 = $slope->(map { $s[$_] + $dt / 2 * $k1[$_] } 0 .. 3);
+        my @k3 = $slope->(map { $s[$_] + $dt / 2 * $k2[$_] } 0 .. 3);
+        my @k4 = $slope->(map { $s[$_] + $dt * $k3[$_] } 0 .. 3);
+        push @states, [ map { $s[$_] + $dt / 6 * ($k1[$_] + 2 * $k2[$_] + 2 * $k3[$_] + $k4[$_]) } 0 .. 3 ];
+    }
+    return @states;
+}
+
+# The path of the lower weight over 30 seconds, let go with both arms high
+# up. Its hue runs with time, and the arms are drawn in white where they end.
+sub pendulum_canvas {
+    my ($time, $steps) = (30, 12000);
+    my @swing  = double_pendulum([ 2, 2.6, 0, 0 ], $time, $steps);
+    my $place  = sub { my ($a, $b) = @{ $_[0] }; ([ sin $a, -cos $a ], [ sin($a) + sin($b), -cos($a) - cos($b) ]) };
+    my @points = map { [ @{ centered_pixel(@{ ($place->($swing[$_]))[1] }, 21) }, $_ / $steps ] } 0 .. $steps;
+    my @rgb    = map { [ map { [ 0, 0, 0 ] } 1 .. 140 ] } 1 .. 48;
+    draw_glow_curve(\@rgb, \@points, \@ZETA_HUES, 0.5);
+    my ($upper, $lower) = map { centered_pixel(@$_, 21) } $place->($swing[-1]);
+    paint_points(\@rgb, [ line_points(centered_pixel(0, 0, 21), $upper, 0), line_points($upper, $lower, 0) ], [ 255, 255, 255 ]);
+    my @palette = (gradient_palette(\@ZETA_HUES), $BLACK, 98);
+    my $canvas  = pixels_to_canvas([ map { [ map { nearest_color_in(\@palette, @$_) } @$_ ] } @rgb ]);
+    put_text($canvas, 0, 1, 'a double pendulum:', 97);
+    put_text($canvas, 1, 1, 'thirty seconds',     94);
+    put_text($canvas, 2, 1, 'of chaos',           94);
+    return $canvas;
+}
+
+# Temple Fay's butterfly curve: r = e^cos t - 2 cos 4t - sin^5(t / 12),
+# drawn as x = r sin t, y = r cos t so the butterfly sits upright. The
+# sin^5(t / 12) term shifts every loop a little, so it takes twelve turns to
+# close.
+sub butterfly_point {
+    my ($t) = @_;
+    my $r = exp(cos $t) - 2 * cos(4 * $t) - sin($t / 12)**5;
+    return [ sin($t) * $r, cos($t) * $r ];
+}
+
+sub butterfly_canvas {
+    my $steps  = 8000;
+    my $turns  = 96 * atan2(1, 1);
+    my @curve  = map { butterfly_point($turns * $_ / $steps) } 0 .. $steps;
+    my $pixel  = fit_to_frame(\@curve);
+    my @points = map { [ @{ $pixel->(@{ $curve[$_] }) }, $_ / $steps ] } 0 .. $steps;
+    my $canvas = glow_lines_canvas(\@points, \@ZETA_HUES, 0.5);
+    put_text($canvas, 23, 28, 'Fay\'s butterfly', 97);
+    return $canvas;
+}
+
+# The circle map: a point on a circle (as a fraction of a turn) steps round
+# by omega each time, but gets kicked back toward 0 by K / 2 pi sin(2 pi x).
+# The rotation number is how far round it goes per step in the long run. We
+# let it settle for 200 steps, then average over 420 more; 420 is a multiple
+# of every whole number up to 7, so a point locked onto a cycle that goes p
+# times round in q steps, q up to 7, gives exactly p / q.
+sub rotation_number {
+    my ($omega, $k) = @_;
+    my $tau = 8 * atan2(1, 1);
+    my $x   = 0;
+    $x += $omega - $k / $tau * sin($tau * $x) for 1 .. 200;
+    my $start = $x;
+    $x += $omega - $k / $tau * sin($tau * $x) for 1 .. 420;
+    return ($x - $start) / 420;
+}
+
+# The smallest q up to $most for which the rotation number is p / q, or
+# nothing if there's none.
+sub locked_denominator {
+    my ($rotation, $most) = @_;
+    return List::Util::first { abs($rotation * $_ - POSIX::floor($rotation * $_ + 0.5)) < 1e-6 * $_ } 1 .. $most;
+}
+
+# Arnold tongues: omega runs from 0 to 1 across and the kick K from 0 at the
+# bottom to 1 at the top. With no kick, the rotation number is just omega,
+# but kicked, the map locks onto a fraction p / q over a whole range of
+# omega, a tongue that widens as K grows. Tongues are colored by q, and
+# what isn't locked onto a q up to 7 stays black.
+my @TONGUE_COLORS = (52, 53, 54, 56, 58, 60, 62);
+
+sub tongues_canvas {
+    my @pixels = map {
+        my $k = (47.5 - $_) / 47.5;
+        [ map {
+            my $q = locked_denominator(rotation_number(($_ + 0.5) / 140, $k), 7);
+            $q ? $TONGUE_COLORS[ $q - 1 ] : $BLACK;
+        } 0 .. 139 ];
+    } 0 .. 47;
+    my $canvas = pixels_to_canvas(\@pixels);
+    put_text($canvas, 23, 1, 'Arnold tongues: where a kicked circle locks onto p/q turns', 97);
+    return $canvas;
+}
+
 # The (p, q) torus knot: a line wound round a doughnut, p times round the
 # hole and q times round the tube, closing up after one trip. When p and q
 # share no factor it's a single knotted loop. The tube has radius 1 and runs
@@ -3142,6 +3317,10 @@ our %PIECES = (
     drum       => { draw => \&drum_canvas,       about => 'a round drum ringing in two of its modes, with the lines that hold still' },
     theodorus  => { draw => \&theodorus_canvas,  about => 'the spiral of Theodorus: right triangles with sides sqrt 2, sqrt 3, ... sqrt 17' },
     elephant   => { draw => \&elephant_canvas,   about => 'Elephant Valley in the Mandelbrot set, trunks and all' },
+    cycloid    => { draw => \&cycloid_canvas,    about => 'the fastest way down: beads racing on a line, a sine and a cycloid' },
+    pendulum   => { draw => \&pendulum_canvas,   about => 'a double pendulum swinging wildly for thirty seconds' },
+    butterfly  => { draw => \&butterfly_canvas,  about => 'Fay\'s butterfly curve, twelve turns of a polar curve' },
+    tongues    => { draw => \&tongues_canvas,    about => 'Arnold tongues: where a kicked circle locks onto a fraction of a turn' },
     hopf       => { draw => \&hopf_canvas,       about => 'the Hopf fibration: circles on a doughnut, every one linked through every other' },
     burningship => { draw => \&burningship_canvas, about => 'the Burning Ship fractal, z^2 + c with the orbit folded' },
     dragon     => { draw => \&dragon_canvas,     about => 'the Heighway dragon, a strip of paper folded in half eight times' },
