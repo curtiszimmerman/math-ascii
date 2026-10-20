@@ -1388,7 +1388,7 @@ subtest 'cmd_math with no piece lists the pieces' => sub {
     my $server = FakeServer->new;
     my $item   = FakeItem->new;
     cmd_math('', $server, $item);
-    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian billiard buddhabrot burningship butterfly cantor chladni clifford clothoid collatz conformal cycloid dragon drum elephant fern ford fourier golden gosper harmonograph hilbert hopf hyperbolic julia knot koch langton levy life logistic lorenz lyapunov mandelbrot maurer newton pascal pendulum penrose phase piwalk plant pythagoras quasicrystal recaman ripples rossler rule30 sandpile seahorse spirograph sunflower tesseract theodorus threebody timestable tongues tricorn truchet ulam voronoi weierstrass zeta', 'CLIENTCRAP' ] ];
+    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian billiard buddhabrot burningship butterfly cantor chladni clifford clothoid collatz conformal cycloid dragon drum elephant fern fibword ford fourier golden gosper harmonograph hilbert hopf hyperbolic julia kepler knot koch langton levy life logistic lorenz lyapunov mandelbrot maurer mobius newton pascal pendulum penrose phase piwalk plant pythagoras quasicrystal recaman ripples rossler rule30 sandpile seahorse spirograph steiner sunflower tesseract theodorus threebody timestable tongues tricorn truchet ulam voronoi weierstrass zeta', 'CLIENTCRAP' ] ];
     is_deeply $server->{sent}, [], 'nothing was sent';
 };
 
@@ -1429,6 +1429,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'drum          a round drum ringing in two of its modes, with the lines that hold still',
             'elephant      Elephant Valley in the Mandelbrot set, trunks and all',
             'fern          Barnsley\'s fern, grown from four random affine maps',
+            'fibword       the Fibonacci word fractal: a turn after every 0 in 0100101001001...',
             'ford          Ford circles: a circle on every fraction, and neighbors always touch',
             'fourier       a square wave built from sine waves, overshooting at every corner',
             'golden        the golden spiral, drawn through squares whose sides are the Fibonacci numbers',
@@ -1438,6 +1439,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'hopf          the Hopf fibration: circles on a doughnut, every one linked through every other',
             'hyperbolic    the hyperbolic plane in a disk, tiled by same-size pentagons, four to a corner',
             'julia         the Julia set called Douady\'s rabbit, ears within ears',
+            'kepler        Kepler\'s second law: an orbit cut into months that all sweep the same area',
             'knot          a torus knot: a line wound round a doughnut, twice one way and five times the other',
             'koch          the Koch snowflake, an infinitely long edge around a finite area',
             'langton       Langton\'s ant: ten thousand steps of mess, then out of nowhere a highway',
@@ -1448,6 +1450,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'lyapunov      a Lyapunov fractal: where a logistic map flipping between two rates settles or turns to chaos',
             'mandelbrot    the whole Mandelbrot set, glowing toward its edge',
             'maurer        a Maurer rose: a walk round a rose in steps of 71 degrees',
+            'mobius        a Mobius strip: a band with a half twist, so it has one side and one edge',
             'newton        Newton\'s method on z^3 - 1, three basins with a fractal border',
             'pascal        Pascal\'s triangle mod 2, which turns out to be Sierpinski\'s',
             'pendulum      a double pendulum swinging wildly for thirty seconds',
@@ -1464,6 +1467,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'sandpile      the Abelian sandpile: grains dropped on one square, toppling in fours',
             'seahorse      a seahorse tail in Seahorse Valley, 600 times closer',
             'spirograph    a spirograph: a gear rolling inside a ring, drawing loops',
+            'steiner       a Steiner chain: a ring of circles that fits however far you turn it',
             'sunflower     seeds placed by the golden angle, falling into Fibonacci spirals',
             'tesseract     a tesseract, the four dimensional cube, turned and seen in perspective',
             'theodorus     the spiral of Theodorus: right triangles with sides sqrt 2, sqrt 3, ... sqrt 17',
@@ -1596,7 +1600,7 @@ my @usage = (
 subtest 'cmd_math refuses bad input' => sub {
     my $item = FakeItem->new;
     cmd_math('nope', FakeServer->new, $item);
-    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian billiard buddhabrot burningship butterfly cantor chladni clifford clothoid collatz conformal cycloid dragon drum elephant fern ford fourier golden gosper harmonograph hilbert hopf hyperbolic julia knot koch langton levy life logistic lorenz lyapunov mandelbrot maurer newton pascal pendulum penrose phase piwalk plant pythagoras quasicrystal recaman ripples rossler rule30 sandpile seahorse spirograph sunflower tesseract theodorus threebody timestable tongues tricorn truchet ulam voronoi weierstrass zeta', 'CLIENTERROR' ] ],
+    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian billiard buddhabrot burningship butterfly cantor chladni clifford clothoid collatz conformal cycloid dragon drum elephant fern fibword ford fourier golden gosper harmonograph hilbert hopf hyperbolic julia kepler knot koch langton levy life logistic lorenz lyapunov mandelbrot maurer mobius newton pascal pendulum penrose phase piwalk plant pythagoras quasicrystal recaman ripples rossler rule30 sandpile seahorse spirograph steiner sunflower tesseract theodorus threebody timestable tongues tricorn truchet ulam voronoi weierstrass zeta', 'CLIENTERROR' ] ],
         'unknown piece';
 
     @printed = ();

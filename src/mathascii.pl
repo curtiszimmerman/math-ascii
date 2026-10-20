@@ -2085,6 +2085,93 @@ sub fibonacci_word_path {
     return ([ 0, 0 ], map { $_->[1] } turtle_segments($moves, 90));
 }
 
+# The strip tipped toward the viewer, drawn as the straight lines across it
+# with its one edge running round twice. Nearer lines cover farther ones, so
+# you can follow the twist. The hue goes round with the lines.
+sub mobius_canvas {
+    my ($width, $lines, $tilt) = (0.6, 36, 0.75);
+    my $pi    = 4 * atan2(1, 1);
+    my $place = sub {
+        my ($u, $v, $position) = @_;
+        my ($x, $y, $z) = @{ mobius_point($u, $v) };
+        return [ @{ centered_pixel($x, $y * cos($tilt) - $z * sin($tilt), 40) }, $position, $y * sin($tilt) + $z * cos($tilt) ];
+    };
+    my @points;
+    for my $k (0 .. $lines - 1) {
+        my $u = 2 * $pi * $k / $lines;
+        push @points, map { $place->($u, $width * $_ / 20, $k / $lines) } -20 .. 20;
+    }
+    push @points, map { my $u = 4 * $pi * $_ / 1200; $place->($u, $width, ($u / (2 * $pi)) - int($u / (2 * $pi))) } 0 .. 1200;
+    my $canvas = glow_lines_canvas(\@points, \@ZETA_HUES, 0.5);
+    put_text($canvas, 0, 1, 'a Mobius strip:', 97);
+    put_text($canvas, 1, 1, 'one side,',       94);
+    put_text($canvas, 2, 1, 'one edge',        94);
+    return $canvas;
+}
+
+# A Steiner chain of nine circles, each its own hue, in a dark ring between
+# the outer circle and an off-center inner one.
+sub steiner_canvas {
+    my ($count, $scale) = (9, 46);
+    my ($outer, $inner, @chain) = steiner_chain($count, 0.4, 0);
+    my $inside  = sub { my ($circle, $x, $y) = @_; ($x - $circle->[0])**2 + ($y - $circle->[1])**2 < $circle->[2]**2 };
+    my @palette = (gradient_palette(\@ZETA_HUES), $BLACK, 24);
+    my @pixels  = map {
+        my $r = $_;
+        [ map {
+            my ($x, $y) = (($_ + 0.5 - 70) / $scale, (23.5 - $r) * 2 / $scale);
+            my ($k) = grep { $inside->($chain[$_], $x, $y) } 0 .. $#chain;
+            defined $k                    ? nearest_color_in(\@palette, gradient_rgb(\@ZETA_HUES, $k / $count))
+                : $inside->($inner, $x, $y) ? $BLACK
+                : $inside->($outer, $x, $y) ? 24
+                :                             $BLACK;
+        } 0 .. 139 ];
+    } 0 .. 47;
+    my $canvas = pixels_to_canvas(\@pixels);
+    put_text($canvas, 0, 1, 'a Steiner chain:',  97);
+    put_text($canvas, 1, 1, 'each circle',       94);
+    put_text($canvas, 2, 1, 'touches its',       94);
+    put_text($canvas, 3, 1, 'neighbors and',     94);
+    put_text($canvas, 4, 1, 'both big circles',  94);
+    return $canvas;
+}
+
+# An orbit of eccentricity 0.7 cut into twelve months, each slice the area
+# the line to the sun sweeps in a month. They're all the same size, long and
+# thin far out where the planet crawls and short and fat near the sun where
+# it races.
+sub kepler_canvas {
+    my ($e, $months, $steps) = (0.7, 12, 40);
+    my @orbit = map { orbit_position($_ / ($months * $steps), $e) } 0 .. $months * $steps;
+    my $pixel = fit_to_frame(\@orbit);
+    my $sun   = $pixel->(0, 0);
+    my @rgb   = map { [ map { [ 0, 0, 0 ] } 1 .. 140 ] } 1 .. 48;
+    for my $month (0 .. $months - 1) {
+        my @hue = gradient_rgb(\@ZETA_HUES, $month / $months);
+        for my $k ($month * $steps + 1 .. ($month + 1) * $steps) {
+            fill_polygon(\@rgb, [ $sun, $pixel->(@{ $orbit[ $k - 1 ] }), $pixel->(@{ $orbit[$k] }) ], \@hue);
+        }
+    }
+    paint_points(\@rgb, [ map { line_points($sun, $pixel->(@{ $orbit[ $_ * $steps ] }), 0) } 0 .. $months - 1 ], [ 0, 0, 0 ]);
+    paint_points(\@rgb, [$sun], [ 255, 255, 255 ]);
+    my @palette = (gradient_palette(\@ZETA_HUES), $BLACK, 98);
+    my $canvas  = pixels_to_canvas([ map { [ map { nearest_color_in(\@palette, @$_) } @$_ ] } @rgb ]);
+    put_text($canvas, 0, 1, 'Kepler:',            97);
+    put_text($canvas, 1, 1, 'equal areas',        94);
+    put_text($canvas, 2, 1, 'in equal times',     94);
+    return $canvas;
+}
+
+# The Fibonacci word fractal, 1597 steps, its hue running along it.
+sub fibword_canvas {
+    my @path   = fibonacci_word_path(15);
+    my $pixel  = fit_to_frame(\@path);
+    my @points = map { line_points($pixel->(@{ $path[ $_ - 1 ] }), $pixel->(@{ $path[$_] }), $_ / $#path) } 1 .. $#path;
+    my $canvas = glow_lines_canvas(\@points, \@ZETA_HUES, 0.5);
+    put_text($canvas, 0, 1, 'the Fibonacci word fractal', 97);
+    return $canvas;
+}
+
 # The C curve, order 10, its hue running along it.
 sub levy_canvas {
     my @path   = levy_path(10);
@@ -3558,6 +3645,10 @@ our %PIECES = (
     levy       => { draw => \&levy_canvas,       about => 'the Levy C curve: every line replaced by two at right angles, over and over' },
     plant      => { draw => \&plant_canvas,      about => 'Lindenmayer\'s fractal plant, grown by rewriting a string of turtle moves' },
     billiard   => { draw => \&billiard_canvas,   about => 'a billiard ball in an ellipse, its path never crossing a smaller ellipse inside' },
+    mobius     => { draw => \&mobius_canvas,     about => 'a Mobius strip: a band with a half twist, so it has one side and one edge' },
+    steiner    => { draw => \&steiner_canvas,    about => 'a Steiner chain: a ring of circles that fits however far you turn it' },
+    kepler     => { draw => \&kepler_canvas,     about => 'Kepler\'s second law: an orbit cut into months that all sweep the same area' },
+    fibword    => { draw => \&fibword_canvas,    about => 'the Fibonacci word fractal: a turn after every 0 in 0100101001001...' },
     hopf       => { draw => \&hopf_canvas,       about => 'the Hopf fibration: circles on a doughnut, every one linked through every other' },
     burningship => { draw => \&burningship_canvas, about => 'the Burning Ship fractal, z^2 + c with the orbit folded' },
     dragon     => { draw => \&dragon_canvas,     about => 'the Heighway dragon, a strip of paper folded in half eight times' },
