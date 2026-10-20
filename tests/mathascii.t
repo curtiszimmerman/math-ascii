@@ -1241,6 +1241,64 @@ subtest 'ellipse_bounces' => sub {
         'shot along the long axis it bounces straight back and forth';
 };
 
+subtest 'terdragon_path' => sub {
+    my $pi = 4 * atan2(1, 1);
+    for my $order (1, 3, 6) {
+        my @path = terdragon_path($order);
+        is scalar @path, 3**$order + 1, "order $order is 3^$order steps";
+        my @odd = grep {
+            my ($dx, $dy) = ($path[$_][0] - $path[ $_ - 1 ][0], $path[$_][1] - $path[ $_ - 1 ][1]);
+            my $thirds = atan2($dy, $dx) / (2 * $pi / 3);
+            abs(sqrt($dx**2 + $dy**2) - 1) > 1e-9 || abs($thirds - POSIX::floor($thirds + 0.5)) > 1e-9;
+        } 1 .. $#path;
+        is_deeply \@odd, [], 'every step is one long and heads along a multiple of 120 degrees';
+        is_deeply rounded($path[-1]), rounded([ sqrt(3)**$order * cos($order * $pi / 6), sqrt(3)**$order * sin($order * $pi / 6) ]),
+            'each order ends sqrt(3) times further out, turned 30 degrees';
+        my %walked;
+        is_deeply [ grep { $walked{ join ',', sort map { join ',', @{ rounded($_) } } @path[ $_ - 1, $_ ] }++ } 1 .. $#path ], [],
+            'it comes back to corners but never walks the same edge twice';
+    }
+};
+
+subtest 'brownian_tree' => sub {
+    my @tree = brownian_tree(12, 7);
+    is_deeply $tree[0], [ 0, 0 ], 'it grows from the seed at the origin';
+    my %stuck = ('0,0' => 1);
+    my @loose;
+    for my $cell (@tree[ 1 .. $#tree ]) {
+        my ($x, $y) = @$cell;
+        push @loose, "$x,$y" if $stuck{"$x,$y"} || !grep { $stuck{$_} } ($x - 1) . ",$y", ($x + 1) . ",$y", "$x," . ($y - 1), "$x," . ($y + 1);
+        $stuck{"$x,$y"} = 1;
+    }
+    is_deeply \@loose, [], 'every grain lands on an empty square next to one already stuck';
+    my $far = sub { sqrt($_[0][0]**2 + $_[0][1]**2) };
+    ok $far->($tree[-1]) >= 12, 'it stops once a grain lands as far out as asked';
+    is_deeply [ grep { $far->($_) >= 12 } @tree[ 0 .. $#tree - 1 ] ], [], 'and not before';
+    ok @tree > 50, 'by which time plenty have stuck';
+    is_deeply [ brownian_tree(12, 7) ], \@tree, 'the same seed grows the same tree';
+    isnt join(' ', map { "@$_" } brownian_tree(12, 8)), join(' ', map { "@$_" } @tree), 'and another seed another';
+};
+
+subtest 'cassini_product' => sub {
+    my $pi = 4 * atan2(1, 1);
+    is_deeply [ map { sprintf '%.9f', cassini_product($_, 0) } 0, 0.5, 2, -3 ], [ map { sprintf '%.9f', abs($_**2 - 1) } 0, 0.5, 2, -3 ],
+        'along the line through the foci it is |x^2 - 1|';
+    my @off = grep {
+        my $r = sqrt(2 * cos(2 * $_));
+        abs(cassini_product($r * cos $_, $r * sin $_) - 1) > 1e-9;
+    } map { $_ * $pi / 20 - $pi / 4 + 0.01 } 0 .. 9;
+    is_deeply \@off, [], 'on the lemniscate r^2 = 2 cos 2t it is 1';
+    is cassini_product(0.3, 0.7), cassini_product(-0.3, -0.7), 'turning half way round leaves it alone';
+};
+
+subtest 'klein_point' => sub {
+    my $pi = 4 * atan2(1, 1);
+    my @unclosed = grep { "@{ rounded([ klein_point($pi, $_) ]) }" ne "@{ rounded([ klein_point(0, $pi - $_) ]) }" } 0, 0.4, 1, 2.5, 4;
+    is_deeply \@unclosed, [], 'the tube closes up, its two ends glued with a flip';
+    isnt "@{ rounded([ klein_point($pi, 1) ]) }", "@{ rounded([ klein_point(0, 1) ]) }", 'which glued straight would make it a torus';
+    is_deeply rounded([ klein_point(0, 1) ]), rounded([ -0.4 * cos 1, 0, 0.4 * sin 1 ]), 'the mouth is a circle of radius 0.4';
+};
+
 subtest 'pi_digits' => sub {
     my @digits = pi_digits(800);
     is scalar @digits, 800, 'as many digits as asked for';
@@ -1515,7 +1573,7 @@ subtest 'cmd_math with no piece lists the pieces' => sub {
     my $server = FakeServer->new;
     my $item   = FakeItem->new;
     cmd_math('', $server, $item);
-    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian billiard buddhabrot burningship butterfly cantor caustic chladni clifford clothoid collatz conformal cycloid dipole dragon drum elephant euler fern fibword ford fourier gaussian golden gosper harmonograph hilbert hopf hyperbolic julia kepler knot koch langton levy life logistic lorenz lyapunov mandelbrot maurer minibrot mobius newton orbital pascal pendulum penrose phase phoenix piwalk plant pursuit pythagoras quasicrystal recaman ripples rossler rule30 sandpile seahorse spirograph steiner sunflower tesseract theodorus threebody timestable tongues tricorn truchet ulam voronoi weierstrass zeta', 'CLIENTCRAP' ] ];
+    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian billiard brownian buddhabrot burningship butterfly cantor cassini caustic chladni clifford clothoid collatz conformal cycloid dipole dragon drum elephant euler fern fibword ford fourier gaussian golden gosper harmonograph hilbert hopf hyperbolic julia kepler klein knot koch langton levy life logistic lorenz lyapunov mandelbrot maurer minibrot mobius newton orbital pascal pendulum penrose phase phoenix piwalk plant pursuit pythagoras quasicrystal recaman ripples rossler rule30 sandpile seahorse spirograph steiner sunflower terdragon tesseract theodorus threebody timestable tongues tricorn truchet ulam voronoi weierstrass zeta', 'CLIENTCRAP' ] ];
     is_deeply $server->{sent}, [], 'nothing was sent';
 };
 
@@ -1542,10 +1600,12 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
         map { [ "math: $_", 'CLIENTCRAP' ] }
             'apollonian    the Apollonian gasket, every gap between circles filled with another circle',
             'billiard      a billiard ball in an ellipse, its path never crossing a smaller ellipse inside',
+            'brownian      a Brownian tree: grains wander in at random and stick where they first touch',
             'buddhabrot    the Buddhabrot: the paths of every point that escapes the Mandelbrot set',
             'burningship   the Burning Ship fractal, z^2 + c with the orbit folded',
             'butterfly     Fay\'s butterfly curve, twelve turns of a polar curve',
             'cantor        the devil\'s staircase, climbing only on the Cantor set',
+            'cassini       Cassini ovals: the curves where the distances to two points multiply to the same number',
             'caustic       the bright cusped curve that light draws in the bottom of a coffee cup',
             'chladni       sand on a ringing metal plate, gathered on the lines that stand still',
             'clifford      a Clifford strange attractor, drawn like smoke',
@@ -1571,6 +1631,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'hyperbolic    the hyperbolic plane in a disk, tiled by same-size pentagons, four to a corner',
             'julia         the Julia set called Douady\'s rabbit, ears within ears',
             'kepler        Kepler\'s second law: an orbit cut into months that all sweep the same area',
+            'klein         the Klein bottle, a surface with only one side, passing through itself',
             'knot          a torus knot: a line wound round a doughnut, twice one way and five times the other',
             'koch          the Koch snowflake, an infinitely long edge around a finite area',
             'langton       Langton\'s ant: ten thousand steps of mess, then out of nowhere a highway',
@@ -1604,6 +1665,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'spirograph    a spirograph: a gear rolling inside a ring, drawing loops',
             'steiner       a Steiner chain: a ring of circles that fits however far you turn it',
             'sunflower     seeds placed by the golden angle, falling into Fibonacci spirals',
+            'terdragon     the terdragon: every line replaced by three in a zigzag, over and over',
             'tesseract     a tesseract, the four dimensional cube, turned and seen in perspective',
             'theodorus     the spiral of Theodorus: right triangles with sides sqrt 2, sqrt 3, ... sqrt 17',
             'threebody     three bodies chasing each other round a figure eight under gravity',
@@ -1735,7 +1797,7 @@ my @usage = (
 subtest 'cmd_math refuses bad input' => sub {
     my $item = FakeItem->new;
     cmd_math('nope', FakeServer->new, $item);
-    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian billiard buddhabrot burningship butterfly cantor caustic chladni clifford clothoid collatz conformal cycloid dipole dragon drum elephant euler fern fibword ford fourier gaussian golden gosper harmonograph hilbert hopf hyperbolic julia kepler knot koch langton levy life logistic lorenz lyapunov mandelbrot maurer minibrot mobius newton orbital pascal pendulum penrose phase phoenix piwalk plant pursuit pythagoras quasicrystal recaman ripples rossler rule30 sandpile seahorse spirograph steiner sunflower tesseract theodorus threebody timestable tongues tricorn truchet ulam voronoi weierstrass zeta', 'CLIENTERROR' ] ],
+    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian billiard brownian buddhabrot burningship butterfly cantor cassini caustic chladni clifford clothoid collatz conformal cycloid dipole dragon drum elephant euler fern fibword ford fourier gaussian golden gosper harmonograph hilbert hopf hyperbolic julia kepler klein knot koch langton levy life logistic lorenz lyapunov mandelbrot maurer minibrot mobius newton orbital pascal pendulum penrose phase phoenix piwalk plant pursuit pythagoras quasicrystal recaman ripples rossler rule30 sandpile seahorse spirograph steiner sunflower terdragon tesseract theodorus threebody timestable tongues tricorn truchet ulam voronoi weierstrass zeta', 'CLIENTERROR' ] ],
         'unknown piece';
 
     @printed = ();

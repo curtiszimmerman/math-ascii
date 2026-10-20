@@ -629,6 +629,15 @@ sub burningship_canvas {
     return $canvas;
 }
 
+# A little random number generator of our own, the classic C library one:
+# hand it a seed and it hands back the next, from 0 up to 2^31. Pieces that
+# need randomness start it from a fixed seed, so they come out the same every
+# time and nothing else's use of rand changes them.
+sub next_seed {
+    my ($seed) = @_;
+    return ($seed * 1103515245 + 12345) % 2147483648;
+}
+
 # Barnsley's fern: start anywhere, then over and over pick one of four
 # affine maps at random and apply it. The points pile up into a fern, because
 # each map shrinks the whole fern into one part of itself: the stem, the next
@@ -641,15 +650,13 @@ my @FERN_MAPS = (
     [ 0.07, -0.15, 0.28,  0.26,  0.24, 0, 0.44 ],
 );
 
-# $count points of the fern, as [x, y]. The randomness comes from a little
-# generator of our own with a fixed seed, so the fern comes out the same every
-# time and nothing else's use of rand changes it.
+# $count points of the fern, as [x, y], picking maps with next_seed.
 sub fern_points {
     my ($count) = @_;
     my ($x, $y, $seed) = (0, 0, 20261018);
     my @points;
     for (1 .. $count) {
-        $seed = ($seed * 1103515245 + 12345) % 2147483648;
+        $seed = next_seed($seed);
         my $roll = $seed / 2147483648;
         my $map  = $FERN_MAPS[-1];
         for my $candidate (@FERN_MAPS) {
@@ -1704,11 +1711,11 @@ sub tesseract_canvas {
 # Truchet tiles in Smith's style: each square tile has two quarter circle
 # arcs round opposite corners, and is laid one of two ways. Returns rows of
 # 0 (arcs round the top left and bottom right corners) or 1 (round the other
-# two), picked by our own generator with a fixed seed.
+# two), picked by next_seed from a fixed seed.
 sub truchet_tiles {
     my ($cols, $rows) = @_;
     my $seed = 20261019;
-    return [ map { [ map { $seed = ($seed * 1103515245 + 12345) % 2147483648; $seed >= 1073741824 ? 1 : 0 } 1 .. $cols ] } 1 .. $rows ];
+    return [ map { [ map { $seed = next_seed($seed); $seed >= 1073741824 ? 1 : 0 } 1 .. $cols ] } 1 .. $rows ];
 }
 
 # Which side of the arcs the point (x, y) is on, in tiles across and down,
@@ -1966,6 +1973,15 @@ sub turtle_segments {
 sub levy_path {
     my ($order) = @_;
     return ([ 0, 0 ], map { $_->[1] } turtle_segments(lsystem_moves('F', { F => '+F--F+' }, $order), 45));
+}
+
+# Davis and Knuth's terdragon: every step replaced by three, the middle one
+# turned back at 120 degrees, which is F -> F+F-F. It visits corners more
+# than once but never walks an edge twice. Returns its corners as [x, y],
+# starting at the origin heading east.
+sub terdragon_path {
+    my ($order) = @_;
+    return ([ 0, 0 ], map { $_->[1] } turtle_segments(lsystem_moves('F', { F => 'F+F-F' }, $order), 120));
 }
 
 # Lindenmayer's fractal plant: X -> F+[[X]-X]-F[-X]+X and F -> FF with 25
@@ -3939,6 +3955,138 @@ sub orbital_canvas {
     return $canvas;
 }
 
+# The terdragon, order 6, hued along its length.
+sub terdragon_canvas {
+    my @path   = terdragon_path(5);
+    my $pixel  = fit_to_frame(\@path);
+    my @points = map { line_points($pixel->(@{ $path[ $_ - 1 ] }), $pixel->(@{ $path[$_] }), $_ / $#path) } 1 .. $#path;
+    my $canvas = glow_lines_canvas(\@points, \@ZETA_HUES, 0.5);
+    put_text($canvas, 0, 1, 'the terdragon:', 97);
+    put_text($canvas, 1, 1, 'F -> F+F-F',     94);
+    return $canvas;
+}
+
+# Diffusion limited aggregation: grains wander in at random, one at a time,
+# on a grid of squares, and stick as soon as they step next to the tree. The
+# tips stick out and catch most of the grains before they can wander deeper
+# in, so the tree grows branches instead of filling in. Returns the squares
+# as [x, y] in the order they stuck, starting from the seed at the origin,
+# and stops once one sticks $radius or further out. Grains start on a circle
+# a little outside the tree, and one that wanders off twice that far is
+# started again, which is the same as waiting for it to wander back.
+sub brownian_tree {
+    my ($radius, $seed) = @_;
+    my %stuck = ('0,0' => 1);
+    my @tree  = ([ 0, 0 ]);
+    my $reach = 0;
+    my $roll  = sub { $seed = next_seed($seed); return $seed / 2147483648 };
+    my @steps = ([ 1, 0 ], [ -1, 0 ], [ 0, 1 ], [ 0, -1 ]);
+    while ($reach < $radius) {
+        my $start = $reach + 3;
+        my ($x, $y);
+        my $launch = sub {
+            my $angle = 8 * atan2(1, 1) * $roll->();
+            ($x, $y) = map { POSIX::floor($_ + 0.5) } $start * cos($angle), $start * sin($angle);
+        };
+        $launch->();
+        until (grep { $stuck{ ($x + $_->[0]) . ',' . ($y + $_->[1]) } } @steps) {
+            my $step = $steps[ POSIX::floor(4 * $roll->()) ];
+            ($x, $y) = ($x + $step->[0], $y + $step->[1]);
+            $launch->() if $x**2 + $y**2 > 4 * $start**2;
+        }
+        $stuck{"$x,$y"} = 1;
+        push @tree, [ $x, $y ];
+        $reach = List::Util::max($reach, sqrt($x**2 + $y**2));
+    }
+    return @tree;
+}
+
+# The tree on squares two pixels wide and one tall, so they're square on
+# screen, colored by when each grain stuck: white hot in the middle where it
+# started, cooling out to the tips.
+my @BROWNIAN_HUES = ([ 0, 255, 255, 255 ], [ 0.25, 255, 200, 0 ], [ 0.6, 255, 80, 0 ], [ 1, 160, 0, 0 ]);
+
+sub brownian_canvas {
+    my @tree    = brownian_tree(34, 20261020);
+    my @palette = gradient_palette(\@BROWNIAN_HUES);
+    my @pixels  = map { [ ($BLACK) x 140 ] } 1 .. 48;
+    for my $k (0 .. $#tree) {
+        my ($x, $y) = @{ $tree[$k] };
+        my ($row, $col) = (23 - $y, 2 * ($x + 35));
+        next if $row < 0 || $row > 47 || $col < 0 || $col > 138;
+        $pixels[$row][$col] = $pixels[$row][ $col + 1 ] = nearest_color_in(\@palette, gradient_rgb(\@BROWNIAN_HUES, $k / $#tree));
+    }
+    my $canvas = pixels_to_canvas(\@pixels);
+    put_text($canvas, 0, 1, 'a Brownian tree:',       97);
+    put_text($canvas, 1, 1, 'grains wandering in at', 94);
+    put_text($canvas, 2, 1, 'random until they stick', 94);
+    return $canvas;
+}
+
+# The product of the distances from (x, y) to the two foci at -1 and 1. Each
+# curve where it's constant is a Cassini oval: one oval round both foci when
+# the product is over 1, two separate ones round each focus when it's under,
+# and the figure eight of Bernoulli's lemniscate right at 1.
+sub cassini_product {
+    my ($x, $y) = @_;
+    return sqrt((($x - 1)**2 + $y**2) * (($x + 1)**2 + $y**2));
+}
+
+# Bands of Cassini ovals, warm inside the lemniscate and cool outside it,
+# brightest next to it, each band's product e^0.4 times the last.
+my @CASSINI_WARM = map { nearest_color(@$_) } [ 255, 230, 120 ], [ 255, 120, 0 ], [ 150, 30, 0 ];
+my @CASSINI_COOL = map { nearest_color(@$_) } [ 150, 230, 255 ], [ 0, 120, 255 ], [ 0, 30, 120 ];
+
+sub cassini_canvas {
+    my $scale  = 30;
+    my @pixels = map {
+        my $y = (23.5 - $_) * 2 / $scale;
+        [ map {
+            my $band = POSIX::floor(log(cassini_product(($_ - 69.5) / $scale, $y)) / 0.4);
+            $band < 0 ? $CASSINI_WARM[ List::Util::min(2, -1 - $band) ] : $CASSINI_COOL[ List::Util::min(2, $band) ];
+        } 0 .. 139 ];
+    } 0 .. 47;
+    my $canvas = pixels_to_canvas(\@pixels);
+    put_text($canvas, 0, 1, 'Cassini ovals', 97);
+    return $canvas;
+}
+
+# A point on the Klein bottle as it's usually drawn in three dimensions,
+# for u from 0 to pi along the tube and v from 0 to 2 pi round it. The tube
+# passes through its own side to get back inside itself, and its two ends
+# are glued with a flip, so there's no inside or outside.
+sub klein_point {
+    my ($u, $v) = @_;
+    my ($c, $s, $cv) = (cos $u, sin $u, cos $v);
+    return (
+        -2 / 15 * $c * (3 * $cv - 30 * $s + 90 * $c**4 * $s - 60 * $c**6 * $s + 5 * $c * $cv * $s),
+        -1 / 15 * $s * (3 * $cv - 3 * $c**2 * $cv - 48 * $c**4 * $cv + 48 * $c**6 * $cv - 60 * $s + 5 * $c * $cv * $s
+            - 5 * $c**3 * $cv * $s - 80 * $c**5 * $cv * $s + 80 * $c**7 * $cv * $s),
+        2 / 15 * (3 + 5 * $c * $s) * sin($v),
+    );
+}
+
+# The bottle as a mesh of rings round the tube and lines along it, tipped a
+# little toward us and laid on its side, hued along the tube, with nearer
+# lines crossing in front.
+sub klein_canvas {
+    my $pi    = 4 * atan2(1, 1);
+    my $tilt  = 0.5;
+    my $seen  = sub {
+        my ($x, $y, $z) = klein_point(@_);
+        return ($y, $x * cos($tilt) - $z * sin($tilt), $x * sin($tilt) + $z * cos($tilt));
+    };
+    my @rings = map { my $u = $_ * $pi / 14; map { [ $u, $_ * $pi / 60 ] } 0 .. 120 } 0 .. 13;
+    my @lines = map { my $v = $_ * $pi / 4; map { [ $_ * $pi / 240, $v ] } 0 .. 240 } 0 .. 7;
+    my @at    = map { [ $seen->(@$_), $_->[0] / $pi ] } @rings, @lines;
+    my $pixel = fit_to_frame(\@at);
+    my @points = map { [ @{ $pixel->(@$_[ 0, 1 ]) }, $_->[3], $_->[2] ] } @at;
+    my $canvas = glow_lines_canvas(\@points, \@ZETA_HUES, 0.5);
+    put_text($canvas, 0, 1, 'the Klein bottle:', 97);
+    put_text($canvas, 1, 1, 'one side, no inside', 94);
+    return $canvas;
+}
+
 our %PIECES = (
     mandelbrot => { draw => \&mandelbrot_canvas, about => 'the whole Mandelbrot set, glowing toward its edge' },
     seahorse   => { draw => \&seahorse_canvas,   about => 'a seahorse tail in Seahorse Valley, 600 times closer' },
@@ -3982,6 +4130,10 @@ our %PIECES = (
     gaussian   => { draw => \&gaussian_canvas,   about => 'the Gaussian primes: the primes among the complex numbers a + bi' },
     caustic    => { draw => \&caustic_canvas,    about => 'the bright cusped curve that light draws in the bottom of a coffee cup' },
     orbital    => { draw => \&orbital_canvas,    about => 'a slice through a hydrogen atom\'s 4d orbital' },
+    terdragon  => { draw => \&terdragon_canvas,  about => 'the terdragon: every line replaced by three in a zigzag, over and over' },
+    brownian   => { draw => \&brownian_canvas,   about => 'a Brownian tree: grains wander in at random and stick where they first touch' },
+    cassini    => { draw => \&cassini_canvas,    about => 'Cassini ovals: the curves where the distances to two points multiply to the same number' },
+    klein      => { draw => \&klein_canvas,      about => 'the Klein bottle, a surface with only one side, passing through itself' },
     hopf       => { draw => \&hopf_canvas,       about => 'the Hopf fibration: circles on a doughnut, every one linked through every other' },
     burningship => { draw => \&burningship_canvas, about => 'the Burning Ship fractal, z^2 + c with the orbit folded' },
     dragon     => { draw => \&dragon_canvas,     about => 'the Heighway dragon, a strip of paper folded in half eight times' },
