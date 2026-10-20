@@ -1914,6 +1914,166 @@ sub quasicrystal_canvas {
     return pixels_to_canvas(\@pixels);
 }
 
+# The Gosper curve, or flowsnake, as unit steps on the hexagonal grid. It's
+# the Lindenmayer system A -> A-B--B+A++AA+B-, B -> +A-BB--B-A++A+B, where A
+# and B both step forward and + and - turn 60 degrees. Each order is seven
+# copies of the one before, so it ends sqrt(7) times further away. Returns
+# the corners as [x, y], starting at the origin heading east.
+sub gosper_path {
+    my ($order) = @_;
+    my %rules = (A => 'A-B--B+A++AA+B-', B => '+A-BB--B-A++A+B');
+    my $moves = 'A';
+    $moves = join '', map { $rules{$_} // $_ } split //, $moves for 1 .. $order;
+    my $pi = 4 * atan2(1, 1);
+    my ($x, $y, $heading) = (0, 0, 0);
+    my @path = ([ 0, 0 ]);
+    for my $move (split //, $moves) {
+        if    ($move eq '+') { $heading++ }
+        elsif ($move eq '-') { $heading-- }
+        else {
+            $x += cos($heading * $pi / 3);
+            $y += sin($heading * $pi / 3);
+            push @path, [ $x, $y ];
+        }
+    }
+    return @path;
+}
+
+# Order 3, 343 steps, its hue running along it. Order 4 packs its steps
+# closer than the glow can keep apart.
+sub gosper_canvas {
+    my @path   = gosper_path(3);
+    my $pixel  = fit_to_frame(\@path);
+    my @points = map { line_points($pixel->(@{ $path[ $_ - 1 ] }), $pixel->(@{ $path[$_] }), $_ / $#path) } 1 .. $#path;
+    my $canvas = glow_lines_canvas(\@points, \@ZETA_HUES, 0.5);
+    put_text($canvas, 0, 1, 'the flowsnake:', 97);
+    put_text($canvas, 1, 1, 'Gosper\'s curve', 94);
+    return $canvas;
+}
+
+# The Bessel function J_m(x), from its power series: the sum over k of
+# (-1)^k (x/2)^(2k + m) / (k! (k + m)!). It's what a drum's shape is made of
+# going out from the center. We add terms until they stop mattering, which
+# for the x up to about 15 we use stays accurate.
+sub bessel_j {
+    my ($m, $x) = @_;
+    my $term = ($x / 2)**$m;
+    $term /= $_ for 1 .. $m;
+    my ($sum, $k) = (0, 0);
+    while (1) {
+        $sum += $term;
+        $k++;
+        $term *= -($x / 2)**2 / ($k * ($k + $m));
+        last if abs($term) < 1e-17 * (1 + abs $sum) && $k > $x;
+    }
+    return $sum;
+}
+
+# The $n-th positive x where J_m(x) is 0: walk out in small steps until the
+# sign has flipped $n times, then narrow down on the last flip by halving.
+# The walk is slow, and a drum asks for the same zero at every pixel, so we
+# keep the ones we've found.
+my %bessel_zeros;
+
+sub bessel_zero {
+    my ($m, $n) = @_;
+    return $bessel_zeros{"$m,$n"} //= find_bessel_zero($m, $n);
+}
+
+sub find_bessel_zero {
+    my ($m, $n) = @_;
+    my ($x, $flips, $step) = (0.01, 0, 0.01);
+    while (1) {
+        last if bessel_j($m, $x) * bessel_j($m, $x + $step) < 0 && ++$flips == $n;
+        $x += $step;
+    }
+    my ($low, $high) = ($x, $x + $step);
+    for (1 .. 60) {
+        my $middle = ($low + $high) / 2;
+        if (bessel_j($m, $low) * bessel_j($m, $middle) <= 0) { $high = $middle } else { $low = $middle }
+    }
+    return ($low + $high) / 2;
+}
+
+# How far a round drumhead of radius 1 is pushed out at radius $r and angle
+# $theta in its (m, n) mode: J_m(j r) cos(m theta), where j is the n-th zero
+# of J_m so that the rim stays still. The drum holds still along m lines
+# out from the center and n circles, counting the rim.
+sub drum_height {
+    my ($m, $n, $r, $theta) = @_;
+    return bessel_j($m, bessel_zero($m, $n) * $r) * cos($m * $theta);
+}
+
+# Two drum modes side by side, the parts moving up in orange, the parts
+# moving down in blue, and the still lines between them black.
+my @DRUM_SHADES = ([ -0.4, 59 ], [ -0.07, 35 ], [ 0.07, 88 ], [ 0.4, 29 ], [ 9, 53 ]);
+
+sub drum_canvas {
+    my $radius = 33;
+    my @pixels = map { [ ($BLACK) x 140 ] } 0 .. 47;
+    for my $drum ([ 2, 3, 35.5 ], [ 5, 2, 104.5 ]) {
+        my ($m, $n, $center) = @$drum;
+        my %height;
+        for my $r (0 .. 47) {
+            for my $c (POSIX::ceil($center - $radius) .. POSIX::floor($center + $radius)) {
+                my ($x, $y) = (($c - $center) / $radius, (23.5 - $r) * 2 / $radius);
+                next if $x**2 + $y**2 >= 1;
+                $height{"$r,$c"} = drum_height($m, $n, sqrt($x**2 + $y**2), atan2($y, $x));
+            }
+        }
+        my $most = List::Util::max(map {abs} values %height);
+        for my $key (keys %height) {
+            my ($r, $c) = split /,/, $key;
+            my $level = $height{$key} / $most;
+            $pixels[$r][$c] = (List::Util::first { $level < $_->[0] } @DRUM_SHADES)->[1];
+        }
+    }
+    my $canvas = pixels_to_canvas(\@pixels);
+    put_text($canvas, 0, 1,  'a ringing drum', 97);
+    put_text($canvas, 23, 53, 'two of its modes', 94);
+    return $canvas;
+}
+
+# The spiral of Theodorus: start with a right triangle with both legs 1, then
+# keep standing a new triangle on the last one's long side, with its other
+# leg 1 again. The nth long side is sqrt(n + 1). Returns the outer corners as
+# [x, y], starting from (1, 0), the nth of them sqrt(n) from the center.
+sub theodorus_points {
+    my ($count) = @_;
+    my @points = ([ 1, 0 ]);
+    while (@points < $count) {
+        my ($x, $y) = @{ $points[-1] };
+        my $length = sqrt($x**2 + $y**2);
+        push @points, [ $x - $y / $length, $y + $x / $length ];
+    }
+    return @points;
+}
+
+# The first sixteen triangles, which go just short of one full turn. The
+# seventeenth would overlap the first, and Theodorus is said to have stopped
+# his proofs that sqrt(3), sqrt(5), ... are irrational at sqrt(17). Each
+# triangle gets its own hue, with black edges between them.
+sub theodorus_canvas {
+    my @points = theodorus_points(17);
+    my $pixel  = fit_to_frame([ [ 0, 0 ], @points ]);
+    my @rgb    = map { [ map { [ 0, 0, 0 ] } 1 .. 140 ] } 1 .. 48;
+    my $center = $pixel->(0, 0);
+    for my $k (0 .. 15) {
+        my ($from, $to) = map { $pixel->(@{ $points[$_] }) } $k, $k + 1;
+        fill_polygon(\@rgb, [ $center, $from, $to ], [ gradient_rgb(\@ZETA_HUES, $k / 15) ]);
+        paint_points(\@rgb, [ line_points($center, $from, 0), line_points($from, $to, 0) ], [ 0, 0, 0 ]);
+    }
+    paint_points(\@rgb, [ line_points($center, $pixel->(@{ $points[16] }), 0) ], [ 0, 0, 0 ]);
+    my @palette = (gradient_palette(\@ZETA_HUES), $BLACK);
+    my $canvas  = pixels_to_canvas([ map { [ map { nearest_color_in(\@palette, @$_) } @$_ ] } @rgb ]);
+    put_text($canvas, 19, 54, 'the spiral of',  97);
+    put_text($canvas, 20, 54, 'Theodorus:',     97);
+    put_text($canvas, 21, 54, 'sides sqrt 2,',  94);
+    put_text($canvas, 22, 54, 'sqrt 3, sqrt 4', 94);
+    put_text($canvas, 23, 54, '... sqrt 17',    94);
+    return $canvas;
+}
+
 # The (p, q) torus knot: a line wound round a doughnut, p times round the
 # hole and q times round the tube, closing up after one trip. When p and q
 # share no factor it's a single knotted loop. The tube has radius 1 and runs
@@ -2921,6 +3081,20 @@ sub seahorse_canvas {
     return $canvas;
 }
 
+# Elephant Valley is the crack on the other side of the main cardioid from
+# Seahorse Valley, just right of its cusp at 1/4. The bumps on the boundary
+# there look like a line of elephants, each with a trunk curling into a
+# spiral. The set itself is up and to the left.
+sub elephant_canvas {
+    my $canvas = mandelbrot_view(
+        center_x  => 0.2855, center_y  => 0.0115, half_height => 0.003,
+        max_steps => 1000,   glow_from => 12,     glow_to     => 250,
+    );
+    put_text($canvas, 22, 1, 'elephant valley', 97);
+    put_text($canvas, 23, 1, '0.2855+0.0115i',  94);
+    return $canvas;
+}
+
 # The Julia set for c = -0.123 + 0.745i, known as Douady's rabbit: a body with
 # two ears at every scale, because the critical point cycles with period 3.
 # It starts on palette color 25, a deep purple, because the blends between
@@ -2964,6 +3138,10 @@ our %PIECES = (
     tricorn    => { draw => \&tricorn_canvas,    about => 'the Tricorn, the Mandelbrot set\'s rule with z flipped to its conjugate' },
     threebody  => { draw => \&threebody_canvas,  about => 'three bodies chasing each other round a figure eight under gravity' },
     quasicrystal => { draw => \&quasicrystal_canvas, about => 'seven waves added up into a pattern that never repeats' },
+    gosper     => { draw => \&gosper_canvas,     about => 'the flowsnake: Gosper\'s curve, seven copies of itself on a hexagonal grid' },
+    drum       => { draw => \&drum_canvas,       about => 'a round drum ringing in two of its modes, with the lines that hold still' },
+    theodorus  => { draw => \&theodorus_canvas,  about => 'the spiral of Theodorus: right triangles with sides sqrt 2, sqrt 3, ... sqrt 17' },
+    elephant   => { draw => \&elephant_canvas,   about => 'Elephant Valley in the Mandelbrot set, trunks and all' },
     hopf       => { draw => \&hopf_canvas,       about => 'the Hopf fibration: circles on a doughnut, every one linked through every other' },
     burningship => { draw => \&burningship_canvas, about => 'the Burning Ship fractal, z^2 + c with the orbit folded' },
     dragon     => { draw => \&dragon_canvas,     about => 'the Heighway dragon, a strip of paper folded in half eight times' },

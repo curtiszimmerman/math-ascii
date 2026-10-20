@@ -836,6 +836,58 @@ subtest 'quasicrystal_height' => sub {
     ok !(grep { quasicrystal_height($_ * 0.37, 0, 7) > 7 - 1e-6 } 1 .. 400), 'nowhere else along a line do all seven crest together';
 };
 
+subtest 'gosper_path' => sub {
+    my $pi = 4 * atan2(1, 1);
+    for my $order (1 .. 3) {
+        my @path = gosper_path($order);
+        is scalar @path, 7**$order + 1, "order $order is 7^$order steps";
+        my @odd = grep {
+            my ($dx, $dy) = ($path[$_][0] - $path[ $_ - 1 ][0], $path[$_][1] - $path[ $_ - 1 ][1]);
+            my $sixths = atan2($dy, $dx) / ($pi / 3);
+            abs(sqrt($dx**2 + $dy**2) - 1) > 1e-9 || abs($sixths - POSIX::floor($sixths + 0.5)) > 1e-9;
+        } 1 .. $#path;
+        is_deeply \@odd, [], 'every step is one long and heads along one of the six directions of a hexagon';
+        ok abs(sqrt($path[-1][0]**2 + $path[-1][1]**2) - sqrt(7)**$order) < 1e-9, 'each order ends sqrt(7) times further away';
+    }
+};
+
+subtest 'bessel' => sub {
+    is bessel_j(0, 0), 1, 'J0(0) = 1';
+    is bessel_j(1, 0), 0, 'J1(0) = 0';
+    ok abs(bessel_j(1, 1) - 0.4400505857449335) < 1e-12, 'J1(1)';
+    for my $x (0.7, 4.2, 11.3) {
+        ok abs(bessel_j(1, $x) + bessel_j(3, $x) - 4 / $x * bessel_j(2, $x)) < 1e-9, "J(m-1) + J(m+1) = (2m/x) J(m) (x = $x)";
+    }
+    ok abs(bessel_zero(0, 1) - 2.404825557695773) < 1e-9, 'the first zero of J0';
+    ok abs(bessel_zero(1, 1) - 3.831705970207512) < 1e-9, 'the first zero of J1';
+    ok abs(bessel_zero(2, 2) - 8.417244140399865) < 1e-9, 'the second zero of J2';
+};
+
+subtest 'drum_height' => sub {
+    my $pi = 4 * atan2(1, 1);
+    is_deeply [ grep { abs(drum_height(3, 2, 1, $_)) > 1e-9 } 0.1, 1, 2.5, 4 ], [], 'the rim is held still';
+    is_deeply [ grep { abs(drum_height(3, 2, $_, $pi / 6)) > 1e-9 } 0.2, 0.5, 0.9 ], [], 'and so are the lines out from the center between the lobes';
+    my $ring = bessel_zero(3, 1) / bessel_zero(3, 2);
+    ok abs(drum_height(3, 2, $ring, 0.3)) < 1e-9, 'and a circle partway out';
+    ok drum_height(3, 2, $ring / 2, 0) * drum_height(3, 2, ($ring + 1) / 2, 0) < 0, 'with the drum moving opposite ways either side of it';
+};
+
+subtest 'theodorus_points' => sub {
+    my $pi     = 4 * atan2(1, 1);
+    my @points = theodorus_points(18);
+    is_deeply [ grep { abs(sqrt($points[$_][0]**2 + $points[$_][1]**2) - sqrt($_ + 1)) > 1e-9 } 0 .. $#points ], [],
+        'the nth point is sqrt(n) from the center';
+    is_deeply [ grep {
+        my ($dx, $dy) = ($points[$_][0] - $points[ $_ - 1 ][0], $points[$_][1] - $points[ $_ - 1 ][1]);
+        abs(sqrt($dx**2 + $dy**2) - 1) > 1e-9 || abs($dx * $points[ $_ - 1 ][0] + $dy * $points[ $_ - 1 ][1]) > 1e-9;
+    } 1 .. $#points ], [], 'each step is one long, at right angles to the line out to where it starts';
+    my $turned = 0;
+    my @total  = map { $turned += atan2(1, sqrt $_) } 1 .. 17;
+    ok $total[15] < 2 * $pi && $total[16] > 2 * $pi, 'sixteen triangles fit in one turn and the seventeenth overlaps';
+    my $last = atan2($points[16][1], $points[16][0]);
+    ok abs($last - ($total[15] - 2 * $pi)) < 1e-9, 'which is where the points are';
+};
+
 subtest 'pi_digits' => sub {
     my @digits = pi_digits(800);
     is scalar @digits, 800, 'as many digits as asked for';
@@ -1110,7 +1162,7 @@ subtest 'cmd_math with no piece lists the pieces' => sub {
     my $server = FakeServer->new;
     my $item   = FakeItem->new;
     cmd_math('', $server, $item);
-    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian buddhabrot burningship cantor chladni clifford clothoid collatz conformal dragon fern ford fourier golden harmonograph hilbert hopf hyperbolic julia knot koch langton life logistic lorenz lyapunov mandelbrot maurer newton pascal penrose phase piwalk pythagoras quasicrystal recaman ripples rule30 sandpile seahorse spirograph sunflower tesseract threebody timestable tricorn truchet ulam voronoi weierstrass zeta', 'CLIENTCRAP' ] ];
+    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian buddhabrot burningship cantor chladni clifford clothoid collatz conformal dragon drum elephant fern ford fourier golden gosper harmonograph hilbert hopf hyperbolic julia knot koch langton life logistic lorenz lyapunov mandelbrot maurer newton pascal penrose phase piwalk pythagoras quasicrystal recaman ripples rule30 sandpile seahorse spirograph sunflower tesseract theodorus threebody timestable tricorn truchet ulam voronoi weierstrass zeta', 'CLIENTCRAP' ] ];
     is_deeply $server->{sent}, [], 'nothing was sent';
 };
 
@@ -1145,10 +1197,13 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'collatz       the Collatz coral: every trip down to 1, bending left on even, right on odd',
             'conformal     a square grid under w = sin z, bent but still square at every crossing',
             'dragon        the Heighway dragon, a strip of paper folded in half eight times',
+            'drum          a round drum ringing in two of its modes, with the lines that hold still',
+            'elephant      Elephant Valley in the Mandelbrot set, trunks and all',
             'fern          Barnsley\'s fern, grown from four random affine maps',
             'ford          Ford circles: a circle on every fraction, and neighbors always touch',
             'fourier       a square wave built from sine waves, overshooting at every corner',
             'golden        the golden spiral, drawn through squares whose sides are the Fibonacci numbers',
+            'gosper        the flowsnake: Gosper\'s curve, seven copies of itself on a hexagonal grid',
             'harmonograph  two damped pendulums drawing on paper, spiraling in as they tire',
             'hilbert       the Hilbert curve, one line through all 256 squares of a grid',
             'hopf          the Hopf fibration: circles on a doughnut, every one linked through every other',
@@ -1178,6 +1233,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'spirograph    a spirograph: a gear rolling inside a ring, drawing loops',
             'sunflower     seeds placed by the golden angle, falling into Fibonacci spirals',
             'tesseract     a tesseract, the four dimensional cube, turned and seen in perspective',
+            'theodorus     the spiral of Theodorus: right triangles with sides sqrt 2, sqrt 3, ... sqrt 17',
             'threebody     three bodies chasing each other round a figure eight under gravity',
             'timestable    times tables drawn on a circle, where a cardioid and a nephroid appear',
             'tricorn       the Tricorn, the Mandelbrot set\'s rule with z flipped to its conjugate',
@@ -1306,7 +1362,7 @@ my @usage = (
 subtest 'cmd_math refuses bad input' => sub {
     my $item = FakeItem->new;
     cmd_math('nope', FakeServer->new, $item);
-    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian buddhabrot burningship cantor chladni clifford clothoid collatz conformal dragon fern ford fourier golden harmonograph hilbert hopf hyperbolic julia knot koch langton life logistic lorenz lyapunov mandelbrot maurer newton pascal penrose phase piwalk pythagoras quasicrystal recaman ripples rule30 sandpile seahorse spirograph sunflower tesseract threebody timestable tricorn truchet ulam voronoi weierstrass zeta', 'CLIENTERROR' ] ],
+    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian buddhabrot burningship cantor chladni clifford clothoid collatz conformal dragon drum elephant fern ford fourier golden gosper harmonograph hilbert hopf hyperbolic julia knot koch langton life logistic lorenz lyapunov mandelbrot maurer newton pascal penrose phase piwalk pythagoras quasicrystal recaman ripples rule30 sandpile seahorse spirograph sunflower tesseract theodorus threebody timestable tricorn truchet ulam voronoi weierstrass zeta', 'CLIENTERROR' ] ],
         'unknown piece';
 
     @printed = ();
