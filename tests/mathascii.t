@@ -1020,6 +1020,70 @@ subtest 'plant_segments' => sub {
     }
 };
 
+subtest 'phoenix_escape' => sub {
+    for my $point ([ 0.3, 0.2 ], [ -0.6, 0.5 ], [ 1.1, 0 ]) {
+        my ($x, $y) = @$point;
+        my $plain = escape_time($x, $y, 0.5667, 0, 200);
+        ok defined $plain && abs(phoenix_escape($x, $y, 0.5667, 0, 200) - $plain) < 1e-9, "with p = 0 it's the Julia set's escape ($x, $y)";
+    }
+    my @off = grep { my ($x, $y) = ($_ / 7 - 1, $_ / 11 - 0.5); (phoenix_escape($x, $y, 0.5667, -0.5, 200) // -1) != (phoenix_escape($x, -$y, 0.5667, -0.5, 200) // -1) } 0 .. 14;
+    is_deeply \@off, [], 'mirrored across the real line it escapes just the same';
+    # From 2: 4 + 0.5667, then that squared + 0.5667 - 2/2, then that
+    # squared + 0.5667 - 4.5667/2, which is past the escape radius of 256.
+    my ($z1, $z2) = (4.5667, 4.5667**2 + 0.5667 - 1);
+    my $z3 = $z2**2 + 0.5667 - $z1 / 2;
+    ok abs(phoenix_escape(2, 0, 0.5667, -0.5, 200) - (4 - log(log($z3**2) / 2) / log(2))) < 1e-9, 'each step adds p times the step before';
+};
+
+subtest 'gaussian_prime' => sub {
+    my $is_prime = primes_up_to(200);
+    ok gaussian_prime(1, 1, $is_prime), '1 + i is prime';
+    ok !gaussian_prime(2, 0, $is_prime), '2 is not, it\'s -i(1 + i)^2';
+    ok gaussian_prime(3, 0, $is_prime) && gaussian_prime(0, -7, $is_prime), 'primes 3 more than a multiple of 4 stay prime';
+    ok !gaussian_prime(5, 0, $is_prime) && !gaussian_prime(0, 13, $is_prime), 'primes 1 more than a multiple of 4 split, like 5 = (2 + i)(2 - i)';
+    ok gaussian_prime(2, 1, $is_prime) && gaussian_prime(-3, 2, $is_prime), 'and their factors are prime, with prime norms 5 and 13';
+    ok !gaussian_prime(3, 3, $is_prime), '3 + 3i = 3(1 + i) is not';
+    my @asymmetric = grep {
+        my ($a, $b) = ($_ % 13 - 6, int($_ / 13) - 6);
+        my $prime = gaussian_prime($a, $b, $is_prime) ? 1 : 0;
+        grep { (gaussian_prime(@$_, $is_prime) ? 1 : 0) != $prime } [ -$b, $a ], [ $b, $a ], [ $a, -$b ];
+    } 0 .. 168;
+    is_deeply \@asymmetric, [], 'turning a quarter or flipping across a diagonal or the real line keeps primes prime';
+};
+
+subtest 'cup_caustic' => sub {
+    my $pi = 4 * atan2(1, 1);
+    is_deeply rounded(cup_caustic_point(0)), [ 0.5, 0 ], 'rays near the middle focus halfway to the mirror';
+    for my $theta (-1.2, -0.4, 0.3, 1) {
+        my ($hit, $direction) = cup_reflection($theta);
+        is_deeply rounded($hit), rounded([ cos $theta, sin $theta ]), "a ray along the x axis hits the mirror at angle $theta";
+        ok abs($direction->[0] * $hit->[0] + $direction->[1] * $hit->[1] + cos $theta) < 1e-12 && abs($direction->[0]**2 + $direction->[1]**2 - 1) < 1e-12,
+            'and bounces off at the angle it came in';
+        my $point = cup_caustic_point($theta);
+        is_deeply rounded($point), rounded([ (3 * cos($theta) - cos(3 * $theta)) / 4, (3 * sin($theta) - sin(3 * $theta)) / 4 ]), 'the caustic is a nephroid';
+        my ($ahead, $behind) = (cup_caustic_point($theta + 1e-6), cup_caustic_point($theta - 1e-6));
+        my @along = ($ahead->[0] - $behind->[0], $ahead->[1] - $behind->[1]);
+        ok abs($along[0] * $direction->[1] - $along[1] * $direction->[0]) < 1e-9, 'and the reflected ray just touches it there';
+    }
+};
+
+subtest 'orbitals' => sub {
+    for my $x (0, 0.7, 3.2) {
+        ok abs(associated_laguerre(2, 1, $x) - ($x**2 - 6 * $x + 6) / 2) < 1e-12, "L_2^1($x) = (x^2 - 6x + 6)/2";
+        ok abs(associated_laguerre(1, 3, $x) - (4 - $x)) < 1e-12, "L_1^3($x) = 4 - x";
+    }
+    for my $x (-0.6, 0.2, 0.9) {
+        ok abs(associated_legendre(2, 0, $x) - (3 * $x**2 - 1) / 2) < 1e-12, "P_2($x) = (3x^2 - 1)/2";
+        ok abs(associated_legendre(3, 1, $x) + 1.5 * (5 * $x**2 - 1) * sqrt(1 - $x**2)) < 1e-12, "P_3^1($x) = -3/2 (5x^2 - 1) sqrt(1 - x^2)";
+        ok abs(associated_legendre(2, 2, $x) - 3 * (1 - $x**2)) < 1e-12, "P_2^2($x) = 3(1 - x^2)";
+    }
+    my @along_z = map { hydrogen_wave(4, 1, 0, 0, $_ / 10) } 1 .. 400;
+    my $flips   = grep { $along_z[$_] * $along_z[ $_ - 1 ] < 0 } 1 .. $#along_z;
+    is $flips, 2, '4p has n - l - 1 = 2 spheres where it\'s zero';
+    is_deeply [ grep { abs(hydrogen_wave(4, 1, 0, $_, 0)) > 1e-12 } 0.5, 3, 9 ], [], 'and a flat plane across the z axis';
+    ok hydrogen_wave(3, 2, 1, 2, 2) * hydrogen_wave(3, 2, 1, -2, 2) < 0, 'with m = 1 the two sides of the z axis have opposite signs';
+};
+
 subtest 'mandelbrot_nucleus' => sub {
     my $returns = sub {
         my ($cx, $cy, $period) = @_;

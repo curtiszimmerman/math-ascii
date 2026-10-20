@@ -2000,6 +2000,84 @@ sub ellipse_bounces {
     return @bounces;
 }
 
+# Ushiki's Phoenix: z -> z^2 + c + p z', where z' is z from the step before,
+# starting from z = (x, y) with nothing before it. Both c and p are real
+# here. Returns the smoothed escape time like escape_time, or nothing if z
+# stays bounded for $max_steps.
+sub phoenix_escape {
+    my ($x, $y, $c, $p, $max_steps) = @_;
+    my ($before_x, $before_y) = (0, 0);
+    for my $step (1 .. $max_steps) {
+        ($x, $y, $before_x, $before_y) = ($x * $x - $y * $y + $c + $p * $before_x, 2 * $x * $y + $p * $before_y, $x, $y);
+        my $size = $x * $x + $y * $y;
+        return $step + 1 - log(log($size) / 2) / log(2) if $size > 65536;
+    }
+    return;
+}
+
+# Whether a + bi is a Gaussian prime, given a sieve from primes_up_to that
+# reaches a^2 + b^2. On the axes it's a prime that's 3 more than a multiple
+# of 4 (the others split into two factors); off them, its norm a^2 + b^2
+# has to be prime.
+sub gaussian_prime {
+    my ($a, $b, $is_prime) = @_;
+    return $is_prime->[ abs($a + $b) ] && abs($a + $b) % 4 == 3 if $a == 0 || $b == 0;
+    return $is_prime->[ $a * $a + $b * $b ];
+}
+
+# Light coming in along the x axis hits the inside of the unit circle at
+# angle $theta and bounces off. Returns where it hits and which way it goes
+# after, as [x, y] each.
+sub cup_reflection {
+    my ($theta) = @_;
+    return ([ cos $theta, sin $theta ], [ -cos(2 * $theta), -sin(2 * $theta) ]);
+}
+
+# The reflected rays crowd together along a curve, the bright cusped shape
+# in the bottom of a coffee cup. Each ray touches it cos(theta)/2 along from
+# where it bounced. Returns that point as [x, y].
+sub cup_caustic_point {
+    my ($theta) = @_;
+    my ($hit, $direction) = cup_reflection($theta);
+    return [ map { $hit->[$_] + cos($theta) / 2 * $direction->[$_] } 0, 1 ];
+}
+
+# The associated Laguerre polynomial L_k^alpha(x), by its three-term
+# recurrence. It sets how a hydrogen orbital rises and falls going out from
+# the nucleus.
+sub associated_laguerre {
+    my ($k, $alpha, $x) = @_;
+    my ($before, $now) = (1, 1 + $alpha - $x);
+    return $before if $k == 0;
+    ($before, $now) = ($now, ((2 * $_ + 1 + $alpha - $x) * $now - ($_ + $alpha) * $before) / ($_ + 1)) for 1 .. $k - 1;
+    return $now;
+}
+
+# The associated Legendre function P_l^m(x), with the (-1)^m sign, by
+# recurrence up from P_m^m. It sets how an orbital changes with the angle
+# from the z axis, x being the cosine of that angle.
+sub associated_legendre {
+    my ($l, $m, $x) = @_;
+    my $now = (-1)**$m * (1 - $x**2)**($m / 2);
+    $now *= 2 * $_ - 1 for 1 .. $m;
+    return $now if $l == $m;
+    my ($before, $next) = ($now, $x * (2 * $m + 1) * $now);
+    ($before, $next) = ($next, ($x * (2 * $_ - 1) * $next - ($_ + $m - 1) * $before) / ($_ - $m)) for $m + 2 .. $l;
+    return $next;
+}
+
+# The hydrogen atom's wave function for quantum numbers n, l and m (the real
+# cos(m phi) kind), at the point (x, 0, z) in units of the Bohr radius,
+# without the constant in front. For x below zero phi is pi, which flips the
+# sign when m is odd.
+sub hydrogen_wave {
+    my ($n, $l, $m, $x, $z) = @_;
+    my $r = sqrt($x**2 + $z**2) || 1e-12;
+    my $rho = 2 * $r / $n;
+    my $radial = $rho**$l * exp(-$rho / 2) * associated_laguerre($n - $l - 1, 2 * $l + 1, $rho);
+    return $radial * associated_legendre($l, $m, $z / $r) * ($x < 0 && $m % 2 ? -1 : 1);
+}
+
 # The center of one of the little copies of the Mandelbrot set: the c where
 # 0 comes back to 0 after $period steps of z -> z^2 + c. Found by Newton's
 # method from a guess, carrying the derivative of z with respect to c along.
