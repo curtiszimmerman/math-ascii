@@ -1764,6 +1764,156 @@ sub conformal_canvas {
     return $canvas;
 }
 
+# A Maurer rose: walk round the rose r = sin(n theta) in steps of $d degrees,
+# 360 of them, which always brings you back to the start. Returns the 361
+# points [x, y] the walk stops at.
+sub maurer_rose {
+    my ($n, $d) = @_;
+    my $pi = 4 * atan2(1, 1);
+    return map {
+        my $angle = $_ * $d * $pi / 180;
+        my $r     = sin($n * $angle);
+        [ $r * cos $angle, $r * sin $angle ];
+    } 0 .. 360;
+}
+
+# The rose with n = 6 and d = 71, the walk joined up with straight lines. At
+# this size 360 lines would cover the whole flower, so like the times tables
+# it's colored by how many lines cross each pixel, which brings out the web
+# of curves they make together.
+my @MAURER_GLOW = ([ 0, 0, 0, 116 ], [ 0.5, 165, 0, 255 ], [ 0.8, 255, 0, 255 ], [ 1, 255, 220, 255 ]);
+
+sub maurer_canvas {
+    my @rose = maurer_rose(6, 71);
+    my %crossings;
+    for my $k (1 .. 360) {
+        my %crossed = map { POSIX::floor($_->[0] + 0.5) . ',' . POSIX::floor($_->[1] + 0.5) => 1 }
+            line_points(centered_pixel(@{ $rose[ $k - 1 ] }, 44), centered_pixel(@{ $rose[$k] }, 44), 0);
+        $crossings{$_}++ for keys %crossed;
+    }
+    my $canvas = density_canvas(\%crossings, \@MAURER_GLOW, 0.95, 1);
+    put_text($canvas, 0, 1, 'a Maurer rose:',   97);
+    put_text($canvas, 1, 1, 'r = sin 6 theta,', 94);
+    put_text($canvas, 2, 1, 'joined every 71',  94);
+    put_text($canvas, 3, 1, 'degrees',          94);
+    return $canvas;
+}
+
+# The Tricorn, or Mandelbar: the Mandelbrot set's rule with z flipped to its
+# conjugate before squaring. Its three corners are the same a third of a turn
+# apart. Like the Burning Ship's, the glow starts on a palette color (25, a
+# deep purple) so the blend up from it doesn't go gray.
+my @TRICORN_GLOW = (
+    [ 0,    46,  0,   71 ],
+    [ 0.35, 117, 0,   116 ],
+    [ 0.6,  220, 0,   180 ],
+    [ 0.8,  255, 110, 200 ],
+    [ 1,    255, 230, 240 ],
+);
+
+sub tricorn_canvas {
+    my $canvas = escape_view(
+        center_x  => -0.2, center_y => 0,  half_height => 1.15,
+        glow_from => 3,    glow_to  => 60, glow        => \@TRICORN_GLOW,
+        escape    => sub { escape_time(0, 0, $_[0], $_[1], 300, 0, 1) },
+    );
+    put_text($canvas, 0, 1, 'the Tricorn:',          97);
+    put_text($canvas, 1, 1, 'z -> conj(z)^2 + c',    94);
+    return $canvas;
+}
+
+# Three equal masses chasing each other round one figure eight, found by
+# Moore in 1993 and proved to exist by Chenciner and Montgomery. Starting from
+# Simo's numbers, we step the bodies along under Newton's gravity (G = 1, every
+# mass 1) for $time, in $steps steps, kicking the velocities half a step at
+# each end of a step so energy doesn't drift. Returns every state as
+# [bodies, velocities], each a list of three [x, y].
+sub three_body_orbit {
+    my ($time, $steps) = @_;
+    my $dt = $time / $steps;
+    my @bodies     = ([ 0.97000436, -0.24308753 ], [ -0.97000436, 0.24308753 ], [ 0, 0 ]);
+    my @velocities = ([ 0.466203685, 0.43236573 ], [ 0.466203685, 0.43236573 ], [ -0.93240737, -0.86473146 ]);
+    my $pulls = sub {
+        my @pull = map { [ 0, 0 ] } 0 .. 2;
+        for my $pair ([ 0, 1 ], [ 0, 2 ], [ 1, 2 ]) {
+            my ($i, $j) = @$pair;
+            my ($dx, $dy) = ($bodies[$j][0] - $bodies[$i][0], $bodies[$j][1] - $bodies[$i][1]);
+            my $strength = ($dx**2 + $dy**2)**-1.5;
+            $pull[$i][0] += $dx * $strength;
+            $pull[$i][1] += $dy * $strength;
+            $pull[$j][0] -= $dx * $strength;
+            $pull[$j][1] -= $dy * $strength;
+        }
+        return @pull;
+    };
+    my $state = sub { [ [ map { [@$_] } @bodies ], [ map { [@$_] } @velocities ] ] };
+    my @orbit = ($state->());
+    my @pull  = $pulls->();
+    for (1 .. $steps) {
+        for my $i (0 .. 2) {
+            $velocities[$i][$_] += $pull[$i][$_] * $dt / 2 for 0, 1;
+            $bodies[$i][$_]     += $velocities[$i][$_] * $dt for 0, 1;
+        }
+        @pull = $pulls->();
+        for my $i (0 .. 2) {
+            $velocities[$i][$_] += $pull[$i][$_] * $dt / 2 for 0, 1;
+        }
+        push @orbit, $state->();
+    }
+    return @orbit;
+}
+
+# The three bodies, each with the trail it left over the last third of the
+# period. Between them the trails make the whole figure eight.
+my @THREE_BODY_HUES = ([ 0, 255, 60, 0 ], [ 0.5, 0, 220, 255 ], [ 1, 255, 230, 0 ]);
+
+sub threebody_canvas {
+    my $steps = 3000;
+    my @orbit = three_body_orbit(6.32591398, $steps);
+    my $pixel = fit_to_frame([ map { @{ $_->[0] } } @orbit ]);
+    my @rgb   = map { [ map { [ 0, 0, 0 ] } 1 .. 140 ] } 1 .. 48;
+    for my $body (0 .. 2) {
+        my @trail = map { [ @{ $pixel->(@{ $orbit[$_][0][$body] }) }, $body / 2 ] } $steps - $steps / 3 .. $steps;
+        draw_glow_curve(\@rgb, \@trail, \@THREE_BODY_HUES, 0.7);
+    }
+    for my $body (@{ $orbit[-1][0] }) {
+        my ($row, $col) = @{ $pixel->(@$body) };
+        paint_points(\@rgb, [ map { my $dr = $_; map { [ $row + $dr, $col + $_ ] } -1.5 .. 1.5 } -0.5, 0.5 ], [ 255, 255, 255 ]);
+    }
+    my @palette = (gradient_palette(\@THREE_BODY_HUES), $BLACK, 98);
+    my $canvas  = pixels_to_canvas([ map { [ map { nearest_color_in(\@palette, @$_) } @$_ ] } @rgb ]);
+    put_text($canvas, 0,  1, 'three bodies, one orbit:', 97);
+    put_text($canvas, 1,  1, 'each chases the next',     94);
+    put_text($canvas, 2,  1, 'round a figure eight',     94);
+    return $canvas;
+}
+
+# $waves plane waves, their crests turned evenly round half a circle, added
+# up. With five or seven the pattern never repeats, like the atoms of a
+# quasicrystal, but it looks the same turned by any multiple of 180 / $waves
+# degrees about the center.
+sub quasicrystal_height {
+    my ($x, $y, $waves) = @_;
+    my $pi = 4 * atan2(1, 1);
+    return List::Util::sum(map { cos($x * cos($pi * $_ / $waves) + $y * sin($pi * $_ / $waves)) } 0 .. $waves - 1);
+}
+
+# Seven waves, thirteen pixels from crest to crest, in four shades. Most
+# points sum to something near 0, so the shades are cut by height, not evenly.
+my @QUASICRYSTAL_SHADES = ([ -1.5, 24 ], [ 1, 47 ], [ 3, 46 ], [ 99, 82 ]);
+
+sub quasicrystal_canvas {
+    my $scale  = 8 * atan2(1, 1) / 13;
+    my @pixels = map {
+        my $y = (23.5 - $_) * 2 * $scale;
+        [ map {
+            my $height = quasicrystal_height(($_ - 69.5) * $scale, $y, 7);
+            (List::Util::first { $height < $_->[0] } @QUASICRYSTAL_SHADES)->[1];
+        } 0 .. 139 ];
+    } 0 .. 47;
+    return pixels_to_canvas(\@pixels);
+}
+
 # The (p, q) torus knot: a line wound round a doughnut, p times round the
 # hole and q times round the tube, closing up after one trip. When p and q
 # share no factor it's a single knotted loop. The tube has radius 1 and runs
@@ -2608,10 +2758,12 @@ sub lorenz_canvas {
 #
 # The Mandelbrot set starts every c from z = 0; a Julia set fixes c and starts
 # from each point. With $fold set, z is folded into the first quadrant
-# (|Re z| + i|Im z|) before squaring, which makes the Burning Ship. Folding only
-# changes the sign of the 2xy term, so that's all it touches.
+# (|Re z| + i|Im z|) before squaring, which makes the Burning Ship. With
+# $conjugate set, z is flipped to its complex conjugate before squaring, which
+# makes the Tricorn. Both only change the sign of the 2xy term, so that's all
+# they touch.
 sub escape_time {
-    my ($x, $y, $cx, $cy, $max_steps, $fold) = @_;
+    my ($x, $y, $cx, $cy, $max_steps, $fold, $conjugate) = @_;
 
     # Bounded orbits settle into a cycle. We remember z at steps 1, 2, 4,
     # 8, ... and if z ever comes back to the remembered value, it's caught in a
@@ -2619,7 +2771,7 @@ sub escape_time {
     # $max_steps.
     my ($seen_x, $seen_y, $next_check) = ($x, $y, 1);
     for my $step (1 .. $max_steps) {
-        my $xy = $fold ? abs($x * $y) : $x * $y;
+        my $xy = $fold ? abs($x * $y) : $conjugate ? -$x * $y : $x * $y;
         ($x, $y) = ($x * $x - $y * $y + $cx, 2 * $xy + $cy);
         my $size = $x * $x + $y * $y;
         return $step + 1 - log(log($size) / 2) / log(2) if $size > 65536;
@@ -2808,6 +2960,10 @@ our %PIECES = (
     tesseract  => { draw => \&tesseract_canvas,  about => 'a tesseract, the four dimensional cube, turned and seen in perspective' },
     truchet    => { draw => \&truchet_canvas,    about => 'Truchet tiles: quarter circles laid at random, joining into endless paths' },
     conformal  => { draw => \&conformal_canvas,  about => 'a square grid under w = sin z, bent but still square at every crossing' },
+    maurer     => { draw => \&maurer_canvas,     about => 'a Maurer rose: a walk round a rose in steps of 71 degrees' },
+    tricorn    => { draw => \&tricorn_canvas,    about => 'the Tricorn, the Mandelbrot set\'s rule with z flipped to its conjugate' },
+    threebody  => { draw => \&threebody_canvas,  about => 'three bodies chasing each other round a figure eight under gravity' },
+    quasicrystal => { draw => \&quasicrystal_canvas, about => 'seven waves added up into a pattern that never repeats' },
     hopf       => { draw => \&hopf_canvas,       about => 'the Hopf fibration: circles on a doughnut, every one linked through every other' },
     burningship => { draw => \&burningship_canvas, about => 'the Burning Ship fractal, z^2 + c with the orbit folded' },
     dragon     => { draw => \&dragon_canvas,     about => 'the Heighway dragon, a strip of paper folded in half eight times' },

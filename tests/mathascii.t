@@ -772,6 +772,70 @@ subtest 'complex_sin' => sub {
     ok abs($across[0] * $up[0] + $across[1] * $up[1]) < 1e-6, 'the curves still cross at right angles';
 };
 
+subtest 'maurer_rose' => sub {
+    my $pi   = 4 * atan2(1, 1);
+    my @rose = maurer_rose(6, 71);
+    is scalar @rose, 361, 'a point for every step and one to close it';
+    ok abs($rose[360][0] - $rose[0][0]) < 1e-12 && abs($rose[360][1] - $rose[0][1]) < 1e-12, 'and it closes up';
+    for my $k (1, 7, 200) {
+        my $angle = $k * 71 * $pi / 180;
+        my $r     = sin(6 * $angle);
+        ok abs($rose[$k][0] - $r * cos $angle) < 1e-12 && abs($rose[$k][1] - $r * sin $angle) < 1e-12,
+            "step $k is $k times 71 degrees round, on the rose r = sin 6 theta";
+    }
+};
+
+subtest 'tricorn' => sub {
+    my $pi = 4 * atan2(1, 1);
+    ok !defined escape_time(0, 0, 0, 0, 100, 0, 1), 'c = 0 stays put';
+    for my $cx (-1.9, 0.3, 0.5) {
+        is_deeply [ escape_time(0, 0, $cx, 0, 300, 0, 1) ], [ escape_time(0, 0, $cx, 0, 300) ],
+            "on the real line it is the Mandelbrot set (c = $cx)";
+    }
+    for my $c ([ 0.5, 0.6 ], [ -0.9, 0.7 ], [ 0.1, -1.1 ]) {
+        my ($x, $y) = @$c;
+        my ($turned_x, $turned_y) = ($x * cos(2 * $pi / 3) - $y * sin(2 * $pi / 3), $x * sin(2 * $pi / 3) + $y * cos(2 * $pi / 3));
+        my $here  = escape_time(0, 0, $x, $y, 300, 0, 1);
+        my $there = escape_time(0, 0, $turned_x, $turned_y, 300, 0, 1);
+        ok defined $here && abs($here - $there) < 1e-6, "it looks the same a third of a turn round (c = $x, $y)";
+    }
+};
+
+subtest 'three_body_orbit' => sub {
+    my $period = 6.32591398;
+    my @orbit  = three_body_orbit($period, 30000);
+    is scalar @orbit, 30001, 'a state for every step and the start';
+    my $energy = sub {
+        my ($bodies, $velocities) = @{ $_[0] };
+        my $energy = List::Util::sum(map { ($_->[0]**2 + $_->[1]**2) / 2 } @$velocities);
+        for my $pair ([ 0, 1 ], [ 0, 2 ], [ 1, 2 ]) {
+            my ($a, $b) = @$bodies[@$pair];
+            $energy -= 1 / sqrt(($a->[0] - $b->[0])**2 + ($a->[1] - $b->[1])**2);
+        }
+        return $energy;
+    };
+    ok abs($energy->($orbit[-1]) - $energy->($orbit[0])) < 1e-6, 'energy is kept';
+    is_deeply [ grep { my $b = $_->[0]; abs($b->[0][0] + $b->[1][0] + $b->[2][0]) > 1e-9 || abs($b->[0][1] + $b->[1][1] + $b->[2][1]) > 1e-9 } @orbit ], [],
+        'their center of mass never moves';
+    my ($start, $end) = ($orbit[0][0], $orbit[-1][0]);
+    ok !(grep { abs($start->[$_][0] - $end->[$_][0]) > 1e-3 || abs($start->[$_][1] - $end->[$_][1]) > 1e-3 } 0 .. 2),
+        'after one period every body is back where it started';
+    my $third = $orbit[10000][0];
+    my @took  = grep { abs($third->[0][0] - $start->[$_][0]) < 1e-3 && abs($third->[0][1] - $start->[$_][1]) < 1e-3 } 1, 2;
+    is scalar @took, 1, 'and a third of the way round, a body has taken the place of another, because all three chase each other round one figure eight';
+};
+
+subtest 'quasicrystal_height' => sub {
+    my $pi = 4 * atan2(1, 1);
+    is quasicrystal_height(0, 0, 7), 7, 'at the center all seven waves crest together';
+    for my $point ([ 1.3, 0.4 ], [ -2.2, 5.1 ]) {
+        my ($x, $y) = @$point;
+        my $turned = quasicrystal_height($x * cos($pi / 7) - $y * sin($pi / 7), $x * sin($pi / 7) + $y * cos($pi / 7), 7);
+        ok abs($turned - quasicrystal_height($x, $y, 7)) < 1e-9, "it looks the same turned a fourteenth of the way round ($x, $y)";
+    }
+    ok !(grep { quasicrystal_height($_ * 0.37, 0, 7) > 7 - 1e-6 } 1 .. 400), 'nowhere else along a line do all seven crest together';
+};
+
 subtest 'pi_digits' => sub {
     my @digits = pi_digits(800);
     is scalar @digits, 800, 'as many digits as asked for';
@@ -1046,7 +1110,7 @@ subtest 'cmd_math with no piece lists the pieces' => sub {
     my $server = FakeServer->new;
     my $item   = FakeItem->new;
     cmd_math('', $server, $item);
-    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian buddhabrot burningship cantor chladni clifford clothoid collatz conformal dragon fern ford fourier golden harmonograph hilbert hopf hyperbolic julia knot koch langton life logistic lorenz lyapunov mandelbrot newton pascal penrose phase piwalk pythagoras recaman ripples rule30 sandpile seahorse spirograph sunflower tesseract timestable truchet ulam voronoi weierstrass zeta', 'CLIENTCRAP' ] ];
+    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian buddhabrot burningship cantor chladni clifford clothoid collatz conformal dragon fern ford fourier golden harmonograph hilbert hopf hyperbolic julia knot koch langton life logistic lorenz lyapunov mandelbrot maurer newton pascal penrose phase piwalk pythagoras quasicrystal recaman ripples rule30 sandpile seahorse spirograph sunflower tesseract threebody timestable tricorn truchet ulam voronoi weierstrass zeta', 'CLIENTCRAP' ] ];
     is_deeply $server->{sent}, [], 'nothing was sent';
 };
 
@@ -1098,12 +1162,14 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'lorenz        the Lorenz attractor, the butterfly of chaos',
             'lyapunov      a Lyapunov fractal: where a logistic map flipping between two rates settles or turns to chaos',
             'mandelbrot    the whole Mandelbrot set, glowing toward its edge',
+            'maurer        a Maurer rose: a walk round a rose in steps of 71 degrees',
             'newton        Newton\'s method on z^3 - 1, three basins with a fractal border',
             'pascal        Pascal\'s triangle mod 2, which turns out to be Sierpinski\'s',
             'penrose       a Penrose tiling: two rhombs covering the plane without ever repeating',
             'phase         a phase portrait: zeros and poles of a complex function as color pinwheels',
             'piwalk        a walk steered by the first thousand digits of pi',
             'pythagoras    the Pythagoras tree: squares on the sides of right triangles, branching forever',
+            'quasicrystal  seven waves added up into a pattern that never repeats',
             'recaman       Recaman\'s sequence: hop back if you can, forward if you can\'t, drawn as arcs',
             'ripples       ripples from two stones meeting, calm wherever they cancel',
             'rule30        Wolfram\'s rule 30, one cell growing into chaos',
@@ -1112,7 +1178,9 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'spirograph    a spirograph: a gear rolling inside a ring, drawing loops',
             'sunflower     seeds placed by the golden angle, falling into Fibonacci spirals',
             'tesseract     a tesseract, the four dimensional cube, turned and seen in perspective',
+            'threebody     three bodies chasing each other round a figure eight under gravity',
             'timestable    times tables drawn on a circle, where a cardioid and a nephroid appear',
+            'tricorn       the Tricorn, the Mandelbrot set\'s rule with z flipped to its conjugate',
             'truchet       Truchet tiles: quarter circles laid at random, joining into endless paths',
             'ulam          the Ulam spiral, where the primes line up on diagonals',
             'voronoi       a sunflower\'s seeds, each given the patch of head nearest it',
@@ -1238,7 +1306,7 @@ my @usage = (
 subtest 'cmd_math refuses bad input' => sub {
     my $item = FakeItem->new;
     cmd_math('nope', FakeServer->new, $item);
-    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian buddhabrot burningship cantor chladni clifford clothoid collatz conformal dragon fern ford fourier golden harmonograph hilbert hopf hyperbolic julia knot koch langton life logistic lorenz lyapunov mandelbrot newton pascal penrose phase piwalk pythagoras recaman ripples rule30 sandpile seahorse spirograph sunflower tesseract timestable truchet ulam voronoi weierstrass zeta', 'CLIENTERROR' ] ],
+    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian buddhabrot burningship cantor chladni clifford clothoid collatz conformal dragon fern ford fourier golden harmonograph hilbert hopf hyperbolic julia knot koch langton life logistic lorenz lyapunov mandelbrot maurer newton pascal penrose phase piwalk pythagoras quasicrystal recaman ripples rule30 sandpile seahorse spirograph sunflower tesseract threebody timestable tricorn truchet ulam voronoi weierstrass zeta', 'CLIENTERROR' ] ],
         'unknown piece';
 
     @printed = ();
