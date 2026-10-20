@@ -691,6 +691,87 @@ subtest 'hopf_fiber' => sub {
     }
 };
 
+subtest 'cantor' => sub {
+    is_deeply [ cantor_intervals(0) ], [ [ 0, 1 ] ], 'the Cantor set starts as the whole line';
+    my @third = cantor_intervals(3);
+    is scalar @third, 8, 'every step doubles the pieces';
+    is_deeply [ grep { abs($_->[1] - $_->[0] - 1 / 27) > 1e-12 } @third ], [], 'and cuts their length to a third';
+    ok abs($third[1][0] - 2 / 27) < 1e-12 && abs($third[2][1] - 7 / 27) < 1e-12, 'by dropping the middle thirds';
+
+    is cantor_function(0, 20), 0, 'the staircase starts at 0';
+    is cantor_function(1, 20), 1, 'and climbs to 1';
+    is cantor_function(0.4, 20), 0.5, 'it is flat across the first middle third';
+    is cantor_function(0.6, 20), 0.5, 'all the way';
+    ok abs(cantor_function(0.25, 30) - 1 / 3) < 1e-6, 'at 1/4, 0.0202... in base 3, it is 0.0101... in base 2, which is 1/3';
+    for my $x (0.1, 0.27, 0.71) {
+        ok abs(cantor_function($x, 30) + cantor_function(1 - $x, 30) - 1) < 1e-6, "it is symmetric (x = $x)";
+    }
+};
+
+subtest 'tesseract' => sub {
+    my @vertices = tesseract_vertices();
+    is scalar @vertices, 16, 'sixteen corners';
+    my @edges = tesseract_edges();
+    is scalar @edges, 32, 'thirty-two edges';
+    is_deeply [ grep { my ($a, $b) = @vertices[@$_]; 1 != grep { $a->[$_] != $b->[$_] } 0 .. 3 } @edges ], [],
+        'each joining corners that differ in one coordinate';
+    my %degree;
+    $degree{$_}++ for map {@$_} @edges;
+    is_deeply [ grep { $degree{$_} != 4 } 0 .. 15 ], [], 'four edges meet at every corner';
+
+    my $pi      = 4 * atan2(1, 1);
+    my $rotated = rotate_plane([ 1, 0, 0, 0 ], 0, 3, $pi / 2);
+    ok abs($rotated->[0]) < 1e-12 && abs($rotated->[3] - 1) < 1e-12, 'a quarter turn in the x-w plane takes x to w';
+    my $point = rotate_plane([ 1, 2, 3, 4 ], 1, 2, 0.7);
+    ok abs(List::Util::sum(map { $_**2 } @$point) - 30) < 1e-12, 'turning keeps lengths';
+    is_deeply [ @$point[ 0, 3 ] ], [ 1, 4 ], 'and leaves the other two coordinates alone';
+};
+
+subtest 'truchet' => sub {
+    my $tiles = truchet_tiles(6, 5);
+    is scalar @$tiles, 5, 'as many rows as asked for';
+    is scalar @{ $tiles->[0] }, 6, 'and columns';
+    my %turns = map { $_ => 1 } map {@$_} @$tiles;
+    is_deeply [ sort keys %turns ], [ 0, 1 ], 'tiles are laid both ways';
+
+    # Coloring each side of the arcs by the tile's turn and its place in the
+    # checkerboard has to make every arc a border and no tile edge one.
+    my @seams;
+    for my $i (1 .. 5) {
+        for my $j (0 .. 4) {
+            for my $along (0.1, 0.3, 0.7, 0.9) {
+                push @seams, "column edge $i,$j,$along" if truchet_side($tiles, $i - 1e-9, $j + $along) != truchet_side($tiles, $i + 1e-9, $j + $along);
+                push @seams, "row edge $j,$i,$along" if $i < 5 && truchet_side($tiles, $j + $along, $i - 1e-9) != truchet_side($tiles, $j + $along, $i + 1e-9);
+            }
+        }
+    }
+    is_deeply \@seams, [], 'the two colors run straight across tile edges';
+    my ($x, $y) = (2, 3);
+    my $corner = $tiles->[$y][$x] ? [ $x + 1, $y ] : [ $x, $y ];
+    isnt truchet_side($tiles, $corner->[0] + 0.3 * ($x + 0.5 - $corner->[0]), $corner->[1] + 0.3 * ($y + 0.5 - $corner->[1])),
+        truchet_side($tiles, $corner->[0] + 0.9 * ($x + 0.5 - $corner->[0]), $corner->[1] + 0.9 * ($y + 0.5 - $corner->[1])),
+        'but change across an arc';
+};
+
+subtest 'complex_sin' => sub {
+    my ($u, $v) = complex_sin(0.3, 0);
+    ok abs($u - sin 0.3) < 1e-12 && $v == 0, 'on the real line it is the ordinary sine';
+    for my $y (0.4, 1.2) {
+        my @off = grep { my ($u, $v) = complex_sin($_, $y); abs(($u / POSIX::cosh($y))**2 + ($v / POSIX::sinh($y))**2 - 1) > 1e-12 } -1.5, -0.4, 0.2, 1.1;
+        is_deeply \@off, [], "it bends the line y = $y into an ellipse";
+    }
+    for my $x (0.3, -1.1) {
+        my @off = grep { my ($u, $v) = complex_sin($x, $_); abs(($u / sin $x)**2 - ($v / cos $x)**2 - 1) > 1e-12 } -1, 0.2, 1.4;
+        is_deeply \@off, [], "and the line x = $x into a hyperbola";
+    }
+    my ($h, $x, $y) = (1e-6, 0.7, 0.5);
+    my @across = map { (($_->[0] - $_->[1]) / (2 * $h)) } [ (complex_sin($x + $h, $y))[0], (complex_sin($x - $h, $y))[0] ],
+        [ (complex_sin($x + $h, $y))[1], (complex_sin($x - $h, $y))[1] ];
+    my @up = map { (($_->[0] - $_->[1]) / (2 * $h)) } [ (complex_sin($x, $y + $h))[0], (complex_sin($x, $y - $h))[0] ],
+        [ (complex_sin($x, $y + $h))[1], (complex_sin($x, $y - $h))[1] ];
+    ok abs($across[0] * $up[0] + $across[1] * $up[1]) < 1e-6, 'the curves still cross at right angles';
+};
+
 subtest 'pi_digits' => sub {
     my @digits = pi_digits(800);
     is scalar @digits, 800, 'as many digits as asked for';
@@ -965,7 +1046,7 @@ subtest 'cmd_math with no piece lists the pieces' => sub {
     my $server = FakeServer->new;
     my $item   = FakeItem->new;
     cmd_math('', $server, $item);
-    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian buddhabrot burningship chladni clifford clothoid collatz dragon fern ford fourier golden harmonograph hilbert hopf hyperbolic julia knot koch langton life logistic lorenz lyapunov mandelbrot newton pascal penrose phase piwalk pythagoras recaman ripples rule30 sandpile seahorse spirograph sunflower timestable ulam voronoi weierstrass zeta', 'CLIENTCRAP' ] ];
+    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian buddhabrot burningship cantor chladni clifford clothoid collatz conformal dragon fern ford fourier golden harmonograph hilbert hopf hyperbolic julia knot koch langton life logistic lorenz lyapunov mandelbrot newton pascal penrose phase piwalk pythagoras recaman ripples rule30 sandpile seahorse spirograph sunflower tesseract timestable truchet ulam voronoi weierstrass zeta', 'CLIENTCRAP' ] ];
     is_deeply $server->{sent}, [], 'nothing was sent';
 };
 
@@ -993,10 +1074,12 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'apollonian    the Apollonian gasket, every gap between circles filled with another circle',
             'buddhabrot    the Buddhabrot: the paths of every point that escapes the Mandelbrot set',
             'burningship   the Burning Ship fractal, z^2 + c with the orbit folded',
+            'cantor        the devil\'s staircase, climbing only on the Cantor set',
             'chladni       sand on a ringing metal plate, gathered on the lines that stand still',
             'clifford      a Clifford strange attractor, drawn like smoke',
             'clothoid      the Euler spiral, which bends more the further along it you go',
             'collatz       the Collatz coral: every trip down to 1, bending left on even, right on odd',
+            'conformal     a square grid under w = sin z, bent but still square at every crossing',
             'dragon        the Heighway dragon, a strip of paper folded in half eight times',
             'fern          Barnsley\'s fern, grown from four random affine maps',
             'ford          Ford circles: a circle on every fraction, and neighbors always touch',
@@ -1028,7 +1111,9 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'seahorse      a seahorse tail in Seahorse Valley, 600 times closer',
             'spirograph    a spirograph: a gear rolling inside a ring, drawing loops',
             'sunflower     seeds placed by the golden angle, falling into Fibonacci spirals',
+            'tesseract     a tesseract, the four dimensional cube, turned and seen in perspective',
             'timestable    times tables drawn on a circle, where a cardioid and a nephroid appear',
+            'truchet       Truchet tiles: quarter circles laid at random, joining into endless paths',
             'ulam          the Ulam spiral, where the primes line up on diagonals',
             'voronoi       a sunflower\'s seeds, each given the patch of head nearest it',
             'weierstrass   the Weierstrass function: continuous everywhere, smooth nowhere',
@@ -1153,7 +1238,7 @@ my @usage = (
 subtest 'cmd_math refuses bad input' => sub {
     my $item = FakeItem->new;
     cmd_math('nope', FakeServer->new, $item);
-    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian buddhabrot burningship chladni clifford clothoid collatz dragon fern ford fourier golden harmonograph hilbert hopf hyperbolic julia knot koch langton life logistic lorenz lyapunov mandelbrot newton pascal penrose phase piwalk pythagoras recaman ripples rule30 sandpile seahorse spirograph sunflower timestable ulam voronoi weierstrass zeta', 'CLIENTERROR' ] ],
+    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian buddhabrot burningship cantor chladni clifford clothoid collatz conformal dragon fern ford fourier golden harmonograph hilbert hopf hyperbolic julia knot koch langton life logistic lorenz lyapunov mandelbrot newton pascal penrose phase piwalk pythagoras recaman ripples rule30 sandpile seahorse spirograph sunflower tesseract timestable truchet ulam voronoi weierstrass zeta', 'CLIENTERROR' ] ],
         'unknown piece';
 
     @printed = ();

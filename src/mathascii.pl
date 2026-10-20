@@ -1587,6 +1587,183 @@ sub hopf_canvas {
     return $canvas;
 }
 
+# The Cantor set: start with the line from 0 to 1 and keep cutting the middle
+# third out of every piece. Returns the 2^$level pieces left after $level
+# cuts, as [from, to].
+sub cantor_intervals {
+    my ($level) = @_;
+    my @pieces = ([ 0, 1 ]);
+    for (1 .. $level) {
+        @pieces = map { my $third = ($_->[1] - $_->[0]) / 3; ([ $_->[0], $_->[0] + $third ], [ $_->[1] - $third, $_->[1] ]) } @pieces;
+    }
+    return @pieces;
+}
+
+# The Cantor function, the devil's staircase, read off $depth base 3 digits
+# of x. It climbs from 0 to 1 but is flat across every middle third, so it
+# does all its climbing on the Cantor set, which has no length at all. Read
+# x in base 3: up to the first 1 digit, every 2 becomes a binary 1, and the
+# 1 itself ends the number with a final binary 1.
+sub cantor_function {
+    my ($x, $depth) = @_;
+    return 1 if $x >= 1;
+    my ($value, $bit) = (0, 0.5);
+    for (1 .. $depth) {
+        $x *= 3;
+        my $digit = int $x;
+        return $value + $bit if $digit == 1;
+        $value += $bit if $digit == 2;
+        $x -= $digit;
+        $bit /= 2;
+    }
+    return $value;
+}
+
+# The staircase as a glowing line, with the first five steps of the Cantor
+# set lined up underneath it, one text row each, so every flat stretch sits
+# over a gap.
+sub cantor_canvas {
+    my $samples = 4000;
+    my @points  = map {
+        my $x = $_ / $samples;
+        my $y = cantor_function($x, 12);
+        [ 35 - 33 * $y, 1.5 + 136 * $x, $y ];
+    } 0 .. $samples;
+    my @rgb = map { [ map { [ 0, 0, 0 ] } 1 .. 140 ] } 1 .. 48;
+    draw_glow_curve(\@rgb, \@points, \@ZETA_HUES, 0.7);
+    for my $level (0 .. 4) {
+        my @color = gradient_rgb(\@ZETA_HUES, $level / 4);
+        for my $piece (cantor_intervals($level)) {
+            for my $c (0 .. 139) {
+                next if $c + 0.5 < 2 + 136 * $piece->[0] || $c + 0.5 > 2 + 136 * $piece->[1];
+                $rgb[ 38 + 2 * $level ][$c] = [@color];
+                $rgb[ 39 + 2 * $level ][$c] = [@color];
+            }
+        }
+    }
+    my @palette = (gradient_palette(\@ZETA_HUES), $BLACK);
+    my $canvas  = pixels_to_canvas([ map { [ map { nearest_color_in(\@palette, @$_) } @$_ ] } @rgb ]);
+    put_text($canvas, 0, 1, 'the devil\'s staircase:', 97);
+    put_text($canvas, 1, 1, 'it climbs only on the', 94);
+    put_text($canvas, 2, 1, 'Cantor set below,', 94);
+    put_text($canvas, 3, 1, 'which has no length', 94);
+    return $canvas;
+}
+
+# The tesseract, the four dimensional cube: its corners are every point with
+# coordinates of plus or minus 1, and its edges join corners that differ in
+# just one coordinate.
+sub tesseract_vertices {
+    return map { my $n = $_; [ map { $n >> $_ & 1 ? 1 : -1 } 0 .. 3 ] } 0 .. 15;
+}
+
+sub tesseract_edges {
+    return map { my $n = $_; map { [ $n, $n | 1 << $_ ] } grep { !($n >> $_ & 1) } 0 .. 3 } 0 .. 15;
+}
+
+# Turns a point by $angle in the plane of its coordinates $i and $j, leaving
+# the others alone.
+sub rotate_plane {
+    my ($point, $i, $j, $angle) = @_;
+    my @turned = @$point;
+    @turned[ $i, $j ] = ($point->[$i] * cos($angle) - $point->[$j] * sin($angle), $point->[$i] * sin($angle) + $point->[$j] * cos($angle));
+    return \@turned;
+}
+
+# The tesseract turned partway in two planes that reach into the fourth
+# dimension, then seen in perspective from out along w, the way a cube is
+# drawn as a square inside a square. The near cube comes out big and the far
+# one small, with the other six cubes as the frustums joining them. Then we
+# tip that view toward us. Edges are hued by how far along w they are, and
+# nearer edges cross in front.
+sub tesseract_canvas {
+    my ($camera, $scale) = (3, 15);
+    my @projected = map {
+        my $point = rotate_plane(rotate_plane($_, 0, 3, 0.35), 1, 3, 0.25);
+        my $w = $point->[3];
+        my @seen = map { $_ * $camera / ($camera - $w) } @$point[ 0 .. 2 ];
+        my $view = rotate_plane(rotate_plane(\@seen, 1, 2, 0.5), 0, 2, 0.4);
+        [ @$view, ($w + 1.5) / 3 ];
+    } tesseract_vertices();
+    my @points;
+    for my $edge (tesseract_edges()) {
+        my ($from, $to) = @projected[@$edge];
+        for my $step (0 .. 120) {
+            my @at = map { $from->[$_] + ($to->[$_] - $from->[$_]) * $step / 120 } 0 .. 3;
+            push @points, [ @{ centered_pixel($at[0], $at[1], $scale) }, $at[3], $at[2] ];
+        }
+    }
+    my $canvas = glow_lines_canvas(\@points, \@ZETA_HUES, 0.7);
+    put_text($canvas, 0, 1, 'a tesseract:',          97);
+    put_text($canvas, 1, 1, 'the cube in four',      94);
+    put_text($canvas, 2, 1, 'dimensions, turning',   94);
+    put_text($canvas, 3, 1, 'through the fourth',    94);
+    return $canvas;
+}
+
+# Truchet tiles in Smith's style: each square tile has two quarter circle
+# arcs round opposite corners, and is laid one of two ways. Returns rows of
+# 0 (arcs round the top left and bottom right corners) or 1 (round the other
+# two), picked by our own generator with a fixed seed.
+sub truchet_tiles {
+    my ($cols, $rows) = @_;
+    my $seed = 20261019;
+    return [ map { [ map { $seed = ($seed * 1103515245 + 12345) % 2147483648; $seed >= 1073741824 ? 1 : 0 } 1 .. $cols ] } 1 .. $rows ];
+}
+
+# Which side of the arcs the point (x, y) is on, in tiles across and down,
+# as 0 or 1. The arcs join up into endless winding paths, and the regions
+# between them can always be colored with two colors: flip the color for
+# the corners, for tiles laid the other way, and from one checkerboard
+# square to the next.
+sub truchet_side {
+    my ($tiles, $x, $y) = @_;
+    my ($i, $j) = (POSIX::floor($x), POSIX::floor($y));
+    my ($u, $v) = ($x - $i, $y - $j);
+    my $turn    = $tiles->[$j][$i];
+    my @corners = $turn ? ([ 1, 0 ], [ 0, 1 ]) : ([ 0, 0 ], [ 1, 1 ]);
+    my $in_corner = grep { ($u - $_->[0])**2 + ($v - $_->[1])**2 < 0.25 } @corners;
+    return ($in_corner ? 1 : 0) ^ $turn ^ (($i + $j) % 2);
+}
+
+# Tiles 10 pixels across and 5 down, which is square.
+sub truchet_canvas {
+    my $tiles  = truchet_tiles(14, 10);
+    my @colors = (24, 53);
+    my @pixels = map { my $r = $_; [ map { $colors[ truchet_side($tiles, ($_ + 0.5) / 10, ($r + 0.5) / 5) ] } 0 .. 139 ] } 0 .. 47;
+    return pixels_to_canvas(\@pixels);
+}
+
+# sin of the complex number x + iy, as its real and imaginary parts.
+sub complex_sin {
+    my ($x, $y) = @_;
+    return (sin($x) * POSIX::cosh($y), cos($x) * POSIX::sinh($y));
+}
+
+# A square grid carried through w = sin z. Maps like this one that have a
+# complex derivative are conformal: they bend and stretch, but wherever two
+# lines crossed at right angles, their images still do. The level lines
+# become ellipses (warm) and the upright ones hyperbolas (cool), all sharing
+# the same two foci at plus and minus 1.
+sub conformal_canvas {
+    my $pi = 4 * atan2(1, 1);
+    my ($steps, @lines) = (800);
+    for my $k (1 .. 4) {
+        push @lines, [ map { [ complex_sin(-$pi + 2 * $pi * $_ / $steps, 0.1 + 0.3 * $k), 0.55 + 0.45 * $k / 4 ] } 0 .. $steps ];
+    }
+    for my $k (-3 .. 3) {
+        push @lines, [ map { [ complex_sin($pi / 8 * $k, -1.3 + 2.6 * $_ / $steps), 0.4 * (1 - abs($k) / 4) ] } 0 .. $steps ];
+    }
+    my $pixel  = fit_to_frame([ map {@$_} @lines ]);
+    my @points = map { [ @{ $pixel->(@$_[ 0, 1 ]) }, $_->[2] ] } map {@$_} @lines;
+    my $canvas = glow_lines_canvas(\@points, \@ZETA_HUES, 0.6);
+    put_text($canvas, 0, 1, 'a square grid under', 97);
+    put_text($canvas, 1, 1, 'w = sin z: still',    94);
+    put_text($canvas, 2, 1, 'square at every',     94);
+    put_text($canvas, 3, 1, 'crossing',            94);
+    return $canvas;
+}
+
 # The (p, q) torus knot: a line wound round a doughnut, p times round the
 # hole and q times round the tube, closing up after one trip. When p and q
 # share no factor it's a single knotted loop. The tube has radius 1 and runs
@@ -2627,6 +2804,10 @@ our %PIECES = (
     weierstrass => { draw => \&weierstrass_canvas, about => 'the Weierstrass function: continuous everywhere, smooth nowhere' },
     voronoi    => { draw => \&voronoi_canvas,    about => 'a sunflower\'s seeds, each given the patch of head nearest it' },
     clothoid   => { draw => \&clothoid_canvas,   about => 'the Euler spiral, which bends more the further along it you go' },
+    cantor     => { draw => \&cantor_canvas,     about => 'the devil\'s staircase, climbing only on the Cantor set' },
+    tesseract  => { draw => \&tesseract_canvas,  about => 'a tesseract, the four dimensional cube, turned and seen in perspective' },
+    truchet    => { draw => \&truchet_canvas,    about => 'Truchet tiles: quarter circles laid at random, joining into endless paths' },
+    conformal  => { draw => \&conformal_canvas,  about => 'a square grid under w = sin z, bent but still square at every crossing' },
     hopf       => { draw => \&hopf_canvas,       about => 'the Hopf fibration: circles on a doughnut, every one linked through every other' },
     burningship => { draw => \&burningship_canvas, about => 'the Burning Ship fractal, z^2 + c with the orbit folded' },
     dragon     => { draw => \&dragon_canvas,     about => 'the Heighway dragon, a strip of paper folded in half eight times' },
