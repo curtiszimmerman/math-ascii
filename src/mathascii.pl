@@ -2000,6 +2000,53 @@ sub ellipse_bounces {
     return @bounces;
 }
 
+# The C curve, order 10, its hue running along it.
+sub levy_canvas {
+    my @path   = levy_path(10);
+    my $pixel  = fit_to_frame(\@path);
+    my @points = map { line_points($pixel->(@{ $path[ $_ - 1 ] }), $pixel->(@{ $path[$_] }), $_ / $#path) } 1 .. $#path;
+    my $canvas = glow_lines_canvas(\@points, \@ZETA_HUES, 0.5);
+    put_text($canvas, 0, 1, 'the Levy C curve', 97);
+    return $canvas;
+}
+
+# The plant, order 4, laid on its side so it gets the frame's width; stood
+# up in 48 rows the branches run together. Stems are brown at the root and
+# get greener the more times they've branched.
+my @PLANT_HUES = ([ 0, 150, 75, 0 ], [ 0.3, 90, 200, 0 ], [ 1, 180, 255, 60 ]);
+
+sub plant_canvas {
+    my @segments = plant_segments(4);
+    my $lean     = 5 * 4 * atan2(1, 1) / 180;
+    my $stand    = sub { my ($x, $y) = @{ $_[0] }; [ $x * cos($lean) - $y * sin($lean), $x * sin($lean) + $y * cos($lean) ] };
+    my $pixel    = fit_to_frame([ map { $stand->($_->[0]), $stand->($_->[1]) } @segments ]);
+    my $deepest  = List::Util::max(map { $_->[2] } @segments);
+    my @points   = map { line_points($pixel->(@{ $stand->($_->[0]) }), $pixel->(@{ $stand->($_->[1]) }), $_->[2] / $deepest) } @segments;
+    my $canvas   = glow_lines_canvas(\@points, \@PLANT_HUES, 0.5);
+    put_text($canvas, 0, 1, 'X -> F+[[X]-X]-F[-X]+X', 97);
+    put_text($canvas, 1, 1, 'F -> FF',                94);
+    return $canvas;
+}
+
+# A ball bouncing 300 times in an ellipse. Every chord it travels touches
+# one smaller ellipse with the same foci, so the middle is never crossed and
+# shows as a dark hole, its edge glowing where the chords bunch up. Colored
+# by how many chords cross each pixel. Aimed between the foci instead, the
+# chords would touch a hyperbola, but that comes out as noise at this size.
+sub billiard_canvas {
+    my @bounces = ellipse_bounces(2, 1.2, 0.4, 2.9, 300);
+    my %crossings;
+    for my $k (1 .. $#bounces) {
+        my %crossed = map { POSIX::floor($_->[0] + 0.5) . ',' . POSIX::floor($_->[1] + 0.5) => 1 }
+            line_points(centered_pixel(@{ $bounces[ $k - 1 ] }, 34), centered_pixel(@{ $bounces[$k] }, 34), 0);
+        $crossings{$_}++ for keys %crossed;
+    }
+    my $canvas = density_canvas(\%crossings, \@MAURER_GLOW, 0.95, 1);
+    put_text($canvas, 0, 1, 'a billiard ball', 97);
+    put_text($canvas, 1, 1, 'in an ellipse',   94);
+    return $canvas;
+}
+
 # Order 3, 343 steps, its hue running along it. Order 4 packs its steps
 # closer than the glow can keep apart.
 sub gosper_canvas {
@@ -3173,6 +3220,20 @@ sub lorenz_canvas {
     return $canvas;
 }
 
+# The Rossler attractor seen from above, x across and y up. The color is
+# its height, so the flat spiral is cool and the fold that flings it up and
+# back in glows hot.
+sub rossler_canvas {
+    my @path   = rossler_points(4000);
+    my $pixel  = fit_to_frame(\@path);
+    my @points = map { [ @{ $pixel->(@$_[ 0, 1 ]) }, List::Util::min(1, sqrt($_->[2] / 20)) ] } @path;
+    my $canvas = glow_lines_canvas(\@points, \@LORENZ_HUES, 0.5);
+    put_text($canvas, 21, 1, 'dx/dt = -y - z',           95);
+    put_text($canvas, 22, 1, 'dy/dt = x + 0.2y',         95);
+    put_text($canvas, 23, 1, 'dz/dt = 0.2 + z(x - 5.7)', 95);
+    return $canvas;
+}
+
 # Follows z -> z^2 + c from the starting z given. If z runs away within
 # $max_steps, returns how long it took; otherwise returns nothing. The step
 # count is smoothed (the standard n + 1 - log2(log|z|) trick with a big escape
@@ -3408,6 +3469,10 @@ our %PIECES = (
     pendulum   => { draw => \&pendulum_canvas,   about => 'a double pendulum swinging wildly for thirty seconds' },
     butterfly  => { draw => \&butterfly_canvas,  about => 'Fay\'s butterfly curve, twelve turns of a polar curve' },
     tongues    => { draw => \&tongues_canvas,    about => 'Arnold tongues: where a kicked circle locks onto a fraction of a turn' },
+    rossler    => { draw => \&rossler_canvas,    about => 'the Rossler attractor: chaos from a spiral with a single fold' },
+    levy       => { draw => \&levy_canvas,       about => 'the Levy C curve: every line replaced by two at right angles, over and over' },
+    plant      => { draw => \&plant_canvas,      about => 'Lindenmayer\'s fractal plant, grown by rewriting a string of turtle moves' },
+    billiard   => { draw => \&billiard_canvas,   about => 'a billiard ball in an ellipse, its path never crossing a smaller ellipse inside' },
     hopf       => { draw => \&hopf_canvas,       about => 'the Hopf fibration: circles on a doughnut, every one linked through every other' },
     burningship => { draw => \&burningship_canvas, about => 'the Burning Ship fractal, z^2 + c with the orbit folded' },
     dragon     => { draw => \&dragon_canvas,     about => 'the Heighway dragon, a strip of paper folded in half eight times' },

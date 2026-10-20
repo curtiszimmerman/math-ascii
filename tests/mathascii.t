@@ -1327,7 +1327,7 @@ subtest 'cmd_math with no piece lists the pieces' => sub {
     my $server = FakeServer->new;
     my $item   = FakeItem->new;
     cmd_math('', $server, $item);
-    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian buddhabrot burningship butterfly cantor chladni clifford clothoid collatz conformal cycloid dragon drum elephant fern ford fourier golden gosper harmonograph hilbert hopf hyperbolic julia knot koch langton life logistic lorenz lyapunov mandelbrot maurer newton pascal pendulum penrose phase piwalk pythagoras quasicrystal recaman ripples rule30 sandpile seahorse spirograph sunflower tesseract theodorus threebody timestable tongues tricorn truchet ulam voronoi weierstrass zeta', 'CLIENTCRAP' ] ];
+    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian billiard buddhabrot burningship butterfly cantor chladni clifford clothoid collatz conformal cycloid dragon drum elephant fern ford fourier golden gosper harmonograph hilbert hopf hyperbolic julia knot koch langton levy life logistic lorenz lyapunov mandelbrot maurer newton pascal pendulum penrose phase piwalk plant pythagoras quasicrystal recaman ripples rossler rule30 sandpile seahorse spirograph sunflower tesseract theodorus threebody timestable tongues tricorn truchet ulam voronoi weierstrass zeta', 'CLIENTCRAP' ] ];
     is_deeply $server->{sent}, [], 'nothing was sent';
 };
 
@@ -1353,6 +1353,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
     is_deeply $item->{printed}, [
         map { [ "math: $_", 'CLIENTCRAP' ] }
             'apollonian    the Apollonian gasket, every gap between circles filled with another circle',
+            'billiard      a billiard ball in an ellipse, its path never crossing a smaller ellipse inside',
             'buddhabrot    the Buddhabrot: the paths of every point that escapes the Mandelbrot set',
             'burningship   the Burning Ship fractal, z^2 + c with the orbit folded',
             'butterfly     Fay\'s butterfly curve, twelve turns of a polar curve',
@@ -1379,6 +1380,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'knot          a torus knot: a line wound round a doughnut, twice one way and five times the other',
             'koch          the Koch snowflake, an infinitely long edge around a finite area',
             'langton       Langton\'s ant: ten thousand steps of mess, then out of nowhere a highway',
+            'levy          the Levy C curve: every line replaced by two at right angles, over and over',
             'life          Conway\'s Game of Life: a glider gun firing gliders, with trails',
             'logistic      the logistic map doubling its period over and over until it turns to chaos',
             'lorenz        the Lorenz attractor, the butterfly of chaos',
@@ -1391,10 +1393,12 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'penrose       a Penrose tiling: two rhombs covering the plane without ever repeating',
             'phase         a phase portrait: zeros and poles of a complex function as color pinwheels',
             'piwalk        a walk steered by the first thousand digits of pi',
+            'plant         Lindenmayer\'s fractal plant, grown by rewriting a string of turtle moves',
             'pythagoras    the Pythagoras tree: squares on the sides of right triangles, branching forever',
             'quasicrystal  seven waves added up into a pattern that never repeats',
             'recaman       Recaman\'s sequence: hop back if you can, forward if you can\'t, drawn as arcs',
             'ripples       ripples from two stones meeting, calm wherever they cancel',
+            'rossler       the Rossler attractor: chaos from a spiral with a single fold',
             'rule30        Wolfram\'s rule 30, one cell growing into chaos',
             'sandpile      the Abelian sandpile: grains dropped on one square, toppling in fours',
             'seahorse      a seahorse tail in Seahorse Valley, 600 times closer',
@@ -1531,7 +1535,7 @@ my @usage = (
 subtest 'cmd_math refuses bad input' => sub {
     my $item = FakeItem->new;
     cmd_math('nope', FakeServer->new, $item);
-    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian buddhabrot burningship butterfly cantor chladni clifford clothoid collatz conformal cycloid dragon drum elephant fern ford fourier golden gosper harmonograph hilbert hopf hyperbolic julia knot koch langton life logistic lorenz lyapunov mandelbrot maurer newton pascal pendulum penrose phase piwalk pythagoras quasicrystal recaman ripples rule30 sandpile seahorse spirograph sunflower tesseract theodorus threebody timestable tongues tricorn truchet ulam voronoi weierstrass zeta', 'CLIENTERROR' ] ],
+    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian billiard buddhabrot burningship butterfly cantor chladni clifford clothoid collatz conformal cycloid dragon drum elephant fern ford fourier golden gosper harmonograph hilbert hopf hyperbolic julia knot koch langton levy life logistic lorenz lyapunov mandelbrot maurer newton pascal pendulum penrose phase piwalk plant pythagoras quasicrystal recaman ripples rossler rule30 sandpile seahorse spirograph sunflower tesseract theodorus threebody timestable tongues tricorn truchet ulam voronoi weierstrass zeta', 'CLIENTERROR' ] ],
         'unknown piece';
 
     @printed = ();
