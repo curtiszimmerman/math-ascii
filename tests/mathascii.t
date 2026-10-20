@@ -422,7 +422,7 @@ subtest 'langton_ant' => sub {
     $ant = langton_ant(5);
     is_deeply [ sort keys %{ $ant->{black} } ], [ '0,1', '1,0', '1,1' ], 'the fifth step is on black: it turns it white';
     is_deeply [ @$ant{qw(x y heading)} ], [ -1, 0, 3 ], 'and turns left';
-    is_deeply [ @{ $ant->{painted} }{qw(1,0 1,1 0,0)} ], [ 2, 3, 5 ], 'it remembers the step that last flipped each square';
+    is_deeply [ @{ $ant->{painted} }{ '1,0', '1,1', '0,0' } ], [ 2, 3, 5 ], 'it remembers the step that last flipped each square';
 
     # After about ten thousand steps of mess the ant starts building a
     # "highway" that repeats every 104 steps, two squares further on.
@@ -622,6 +622,72 @@ subtest 'ripple_height' => sub {
     my $x = 0.25 * sqrt(1 + 9 / (4 - 0.25**2));
     for my $time (0, 0.13, 0.5) {
         ok abs(ripple_height($x, 3, $gap, $wavelength, $time)) < 1e-9, "where the paths differ by half a wave they cancel (time $time)";
+    }
+};
+
+subtest 'weierstrass' => sub {
+    my $pi = 4 * atan2(1, 1);
+    ok abs(weierstrass(0, 0.5, 3, 6) - (1 - 0.5**6) / 0.5) < 1e-12, 'at 0 every cosine is 1, a geometric series';
+    ok abs(weierstrass(1, 0.5, 3, 6) + (1 - 0.5**6) / 0.5) < 1e-12, 'at 1 with odd b every cosine is -1';
+    for my $x (0.1, 0.37, -0.8) {
+        ok abs(weierstrass($x, 0.6, 3, 8) - cos($pi * $x) - 0.6 * weierstrass(3 * $x, 0.6, 3, 7)) < 1e-12,
+            "it holds a smaller copy of itself: W(x) = cos(pi x) + a W(bx) (x = $x)";
+    }
+};
+
+subtest 'nearest_seed' => sub {
+    my @seeds = ([ 0, 0 ], [ 4, 0 ], [ 0, 10 ]);
+    my ($seed, $gap) = nearest_seed(\@seeds, 1, 1);
+    is $seed, 0, 'the seed nearest the point';
+    ok abs($gap - (sqrt(10) - sqrt(2))) < 1e-12, 'and how much further the next nearest is';
+    ($seed, $gap) = nearest_seed(\@seeds, 2, 3);
+    ok abs($gap) < 1e-12, 'a point halfway between two seeds is on the border, with no gap';
+    is((nearest_seed(\@seeds, 0.5, 9))[0], 2, 'any seed can be nearest');
+};
+
+subtest 'euler_spiral' => sub {
+    my ($length, $steps) = (4, 2000);
+    my $ds     = $length / $steps;
+    my @spiral = euler_spiral($length, $steps);
+    is scalar @spiral, 2 * $steps + 1, 'points from one end to the other';
+    is_deeply $spiral[$steps], [ 0, 0 ], 'with the middle at the origin';
+    is_deeply [ grep { abs($spiral[$_][0] + $spiral[ -1 - $_ ][0]) > 1e-12 || abs($spiral[$_][1] + $spiral[ -1 - $_ ][1]) > 1e-12 } 0 .. $steps ], [],
+        'the two halves are the same turned half round';
+    is_deeply [ grep { abs(sqrt(($spiral[$_][0] - $spiral[ $_ - 1 ][0])**2 + ($spiral[$_][1] - $spiral[ $_ - 1 ][1])**2) - $ds) > 1e-12 } 1 .. $#spiral ], [],
+        'every step is the same length';
+
+    my $heading = sub { atan2($spiral[ $_[0] ][1] - $spiral[ $_[0] - 1 ][1], $spiral[ $_[0] ][0] - $spiral[ $_[0] - 1 ][0]) };
+    for my $i (500, 1500) {
+        my $s    = ($i - $steps) * $ds;
+        my $turn = $heading->($i + 1) - $heading->($i);
+        ok abs($turn / $ds - $s) < 1e-9, "its curvature is the distance along it (s = $s)";
+    }
+
+    my $end = (euler_spiral(30, 60000))[-1];
+    my $eye = sqrt(4 * atan2(1, 1)) / 2;
+    ok sqrt(($end->[0] - $eye)**2 + ($end->[1] - $eye)**2) < 1 / 30 + 1e-3, 'it winds in toward (sqrt(pi)/2, sqrt(pi)/2)';
+};
+
+subtest 'hopf_fiber' => sub {
+    my @circle = hopf_fiber(0, 0, 100);
+    is_deeply [ grep { abs(sqrt($_->[0]**2 + $_->[1]**2) - 1) > 1e-12 || abs($_->[2]) > 1e-12 } @circle ], [],
+        'the fiber over the north pole is the unit circle';
+
+    # Over the latitude theta the fibers fill a torus that goes round a circle
+    # of radius 1 / cos(theta / 2) with a tube of radius tan(theta / 2).
+    my $theta = 1.1;
+    my ($around, $tube) = (1 / cos($theta / 2), sin($theta / 2) / cos($theta / 2));
+    for my $phi (0, 2, 4) {
+        my @fiber = hopf_fiber($theta, $phi, 400);
+        is_deeply [ grep { abs((sqrt($_->[0]**2 + $_->[1]**2) - $around)**2 + $_->[2]**2 - $tube**2) > 1e-9 } @fiber ], [],
+            "fibers over one latitude lie on one torus (phi = $phi)";
+        my $through = grep {
+            my ($from, $to) = @fiber[ $_ - 1, $_ ];
+            my $f = $from->[2] / ($from->[2] - $to->[2]);
+            $from->[2] * $to->[2] < 0
+                && sqrt(($from->[0] + $f * ($to->[0] - $from->[0]))**2 + ($from->[1] + $f * ($to->[1] - $from->[1]))**2) < 1;
+        } 1 .. $#fiber;
+        is $through, 1, "and each passes once through the north pole's circle, so the two are linked (phi = $phi)";
     }
 };
 
@@ -899,7 +965,7 @@ subtest 'cmd_math with no piece lists the pieces' => sub {
     my $server = FakeServer->new;
     my $item   = FakeItem->new;
     cmd_math('', $server, $item);
-    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian buddhabrot burningship chladni clifford collatz dragon fern ford fourier golden harmonograph hilbert hyperbolic julia knot koch langton life logistic lorenz lyapunov mandelbrot newton pascal penrose phase piwalk pythagoras recaman ripples rule30 sandpile seahorse spirograph sunflower timestable ulam zeta', 'CLIENTCRAP' ] ];
+    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian buddhabrot burningship chladni clifford clothoid collatz dragon fern ford fourier golden harmonograph hilbert hopf hyperbolic julia knot koch langton life logistic lorenz lyapunov mandelbrot newton pascal penrose phase piwalk pythagoras recaman ripples rule30 sandpile seahorse spirograph sunflower timestable ulam voronoi weierstrass zeta', 'CLIENTCRAP' ] ];
     is_deeply $server->{sent}, [], 'nothing was sent';
 };
 
@@ -929,6 +995,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'burningship   the Burning Ship fractal, z^2 + c with the orbit folded',
             'chladni       sand on a ringing metal plate, gathered on the lines that stand still',
             'clifford      a Clifford strange attractor, drawn like smoke',
+            'clothoid      the Euler spiral, which bends more the further along it you go',
             'collatz       the Collatz coral: every trip down to 1, bending left on even, right on odd',
             'dragon        the Heighway dragon, a strip of paper folded in half eight times',
             'fern          Barnsley\'s fern, grown from four random affine maps',
@@ -937,6 +1004,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'golden        the golden spiral, drawn through squares whose sides are the Fibonacci numbers',
             'harmonograph  two damped pendulums drawing on paper, spiraling in as they tire',
             'hilbert       the Hilbert curve, one line through all 256 squares of a grid',
+            'hopf          the Hopf fibration: circles on a doughnut, every one linked through every other',
             'hyperbolic    the hyperbolic plane in a disk, tiled by same-size pentagons, four to a corner',
             'julia         the Julia set called Douady\'s rabbit, ears within ears',
             'knot          a torus knot: a line wound round a doughnut, twice one way and five times the other',
@@ -962,6 +1030,8 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'sunflower     seeds placed by the golden angle, falling into Fibonacci spirals',
             'timestable    times tables drawn on a circle, where a cardioid and a nephroid appear',
             'ulam          the Ulam spiral, where the primes line up on diagonals',
+            'voronoi       a sunflower\'s seeds, each given the patch of head nearest it',
+            'weierstrass   the Weierstrass function: continuous everywhere, smooth nowhere',
             'zeta          the path of zeta(1/2 + it) through its first three zeros',
     ];
     is_deeply $server->{sent}, [], 'nothing was sent';
@@ -1053,7 +1123,7 @@ my @usage = (
 subtest 'cmd_math refuses bad input' => sub {
     my $item = FakeItem->new;
     cmd_math('nope', FakeServer->new, $item);
-    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian buddhabrot burningship chladni clifford collatz dragon fern ford fourier golden harmonograph hilbert hyperbolic julia knot koch langton life logistic lorenz lyapunov mandelbrot newton pascal penrose phase piwalk pythagoras recaman ripples rule30 sandpile seahorse spirograph sunflower timestable ulam zeta', 'CLIENTERROR' ] ],
+    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian buddhabrot burningship chladni clifford clothoid collatz dragon fern ford fourier golden harmonograph hilbert hopf hyperbolic julia knot koch langton life logistic lorenz lyapunov mandelbrot newton pascal penrose phase piwalk pythagoras recaman ripples rule30 sandpile seahorse spirograph sunflower timestable ulam voronoi weierstrass zeta', 'CLIENTERROR' ] ],
         'unknown piece';
 
     @printed = ();

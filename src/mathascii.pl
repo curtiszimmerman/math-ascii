@@ -1441,6 +1441,150 @@ sub ripples_canvas {
     return $canvas;
 }
 
+# Weierstrass's function, the first $terms terms of the sum of
+# a^n cos(b^n pi x). Every term is smooth, but each one wiggles b times faster
+# and only a times smaller, so with a b over 1 the full sum has a corner at
+# every point: continuous everywhere and smooth nowhere.
+sub weierstrass {
+    my ($x, $a, $b, $terms) = @_;
+    my $pi = 4 * atan2(1, 1);
+    return List::Util::sum(0, map { $a**$_ * cos($b**$_ * $pi * $x) } 0 .. $terms - 1);
+}
+
+# The function with a = 0.7 and b = 3 from -0.6 to 0.9, drawn as a mountain
+# range under a night sky, snow on the peaks and forest at the foot. Past
+# eight terms the wiggles are thinner than a pixel. Each column of pixels
+# rises to the highest point the function reaches across that column, so
+# wiggles too thin to see still show up as the jagged ridge. The bands are
+# fractions of the way from the lowest ridge to the highest, and change only
+# between text rows: a band edge through the middle of a row would put a
+# half block in every cell, which blows the line's byte budget.
+my @WEIERSTRASS_BANDS = ([ 0.8, 98 ], [ 0.6, 95 ], [ 0.4, 93 ], [ 0.15, 32 ], [ -9, 20 ]);
+my $WEIERSTRASS_SKY   = 24;
+
+sub weierstrass_canvas {
+    my ($a, $b, $terms, $per_column, $from, $to) = (0.5, 3, 7, 40, -0.6, 0.9);
+    my @ridges = map {
+        my $c = $_;
+        List::Util::max(map { weierstrass($from + ($to - $from) * ($c + $_ / $per_column) / 140, $a, $b, $terms) } 0 .. $per_column);
+    } 0 .. 139;
+    my ($low, $high) = (List::Util::min(@ridges), List::Util::max(@ridges));
+    my @pixels = map { [ ($WEIERSTRASS_SKY) x 140 ] } 0 .. 47;
+    for my $c (0 .. 139) {
+        for my $r (0 .. 47) {
+            my $height = $high - ($r - 4) * ($high - $low) / 36;
+            next if $height > $ridges[$c];
+            my $fraction = ($high - (2 * int($r / 2) - 4) * ($high - $low) / 36 - $low) / ($high - $low);
+            $pixels[$r][$c] = (List::Util::first { $fraction > $_->[0] } @WEIERSTRASS_BANDS)->[1];
+        }
+    }
+    my $canvas = pixels_to_canvas(\@pixels);
+    put_text($canvas, 0, 1, 'Weierstrass: continuous everywhere,', 97);
+    put_text($canvas, 1, 1, 'smooth nowhere', 97);
+    return $canvas;
+}
+
+# Which of the [x, y] seeds is nearest the point (x, y), and how much further
+# away the next nearest one is. The gap closes to 0 on the borders between the
+# seeds' cells.
+sub nearest_seed {
+    my ($seeds, $x, $y) = @_;
+    my @distances = map { sqrt(($seeds->[$_][0] - $x)**2 + ($seeds->[$_][1] - $y)**2) } 0 .. $#$seeds;
+    my @order     = sort { $distances[$a] <=> $distances[$b] } 0 .. $#distances;
+    return ($order[0], $distances[ $order[1] ] - $distances[ $order[0] ]);
+}
+
+# The Voronoi diagram of a sunflower's seeds: every seed gets the patch of
+# head nearer to it than to any other seed. Near the rim each seed touches
+# the seeds 13, 21 and 34 along, so seeds 21 apart run along one of 21
+# spirals. Seed n's spiral is n mod 21, and its neighbor 13 along sits on the
+# next spiral round, so numbering the spirals 13 n mod 21 puts them in order
+# round the head. We color them in seven bands of three, which makes a
+# pinwheel of seven curved arms.
+sub voronoi_canvas {
+    my ($count, $spacing) = (90, 4.8);
+    my @seeds  = sunflower_seeds($count, $spacing);
+    my $radius = $spacing * sqrt($count + 0.5);
+    my @hues   = (52, 53, 54, 56, 58, 60, 62);
+    my @pixels = map {
+        my $y = (23.5 - $_) * 2;
+        [ map {
+            my $x = $_ - 69.5;
+            my ($seed, $gap) = nearest_seed(\@seeds, $x, $y);
+            sqrt($x**2 + $y**2) > $radius || $gap < 1.2 ? $BLACK : $hues[ int(13 * ($seed + 1) % 21 * @hues / 21) ];
+        } 0 .. 139 ];
+    } 0 .. 47;
+    return pixels_to_canvas(\@pixels);
+}
+
+# The Euler spiral, the curve that bends more the further along it you go:
+# its curvature is the distance s along it, so it heads in the direction
+# s^2 / 2. Railways and roads use a stretch of it to ease into a bend. Both
+# ends wind in forever toward two eyes, at plus and minus (sqrt(pi)/2,
+# sqrt(pi)/2). Returns 2 $steps + 1 points [x, y] from s = -$length to
+# $length, adding up the direction a small step at a time.
+sub euler_spiral {
+    my ($length, $steps) = @_;
+    my $ds = $length / $steps;
+    my @half = ([ 0, 0 ]);
+    for my $i (1 .. $steps) {
+        my $heading = (($i - 0.5) * $ds)**2 / 2;
+        push @half, [ $half[-1][0] + $ds * cos($heading), $half[-1][1] + $ds * sin($heading) ];
+    }
+    return ((map { [ -$_->[0], -$_->[1] ] } reverse @half[ 1 .. $#half ]), @half);
+}
+
+# The spiral as a glowing line from one eye to the other, its hue running
+# along it.
+sub clothoid_canvas {
+    my ($length, $steps) = (5, 4000);
+    my @spiral = euler_spiral($length, $steps);
+    my $pixel  = fit_to_frame(\@spiral);
+    my @points = map { [ @{ $pixel->(@{ $spiral[$_] }) }, $_ / $#spiral ] } 0 .. $#spiral;
+    my $canvas = glow_lines_canvas(\@points, \@ZETA_HUES, 0.7);
+    put_text($canvas, 0, 1, 'the Euler spiral:', 97);
+    put_text($canvas, 1, 1, 'it bends more the', 94);
+    put_text($canvas, 2, 1, 'further it goes', 94);
+    return $canvas;
+}
+
+# The Hopf fibration splits the sphere in four dimensions into circles, one
+# over each point of the ordinary sphere, and every one of them is linked
+# through every other. This is the circle over the point at polar angle
+# $theta and longitude $phi, carried into our space by stereographic
+# projection, as $steps + 1 points [x, y, z].
+sub hopf_fiber {
+    my ($theta, $phi, $steps) = @_;
+    my ($c, $s) = (cos($theta / 2), sin($theta / 2));
+    return map {
+        my $psi = 8 * atan2(1, 1) * $_ / $steps;
+        my @point = ($c * cos($psi), $c * sin($psi), $s * cos($psi + $phi), $s * sin($psi + $phi));
+        [ map { $point[$_] / (1 - $point[3]) } 0 .. 2 ];
+    } 0 .. $steps;
+}
+
+# The circles over a ring of points round the equator. They lie on one torus,
+# each looping once round the hole and once round the tube, and each one
+# passes through all the others. They're tipped toward the viewer, and the
+# hue goes round with the longitude.
+sub hopf_canvas {
+    my ($fibers, $tilt, $steps) = (6, 0, 700);
+    my $pi = 4 * atan2(1, 1);
+    my @points;
+    for my $i (0 .. $fibers - 1) {
+        for my $point (hopf_fiber($pi / 2, 2 * $pi * $i / $fibers, $steps)) {
+            my ($x, $y, $z) = @$point;
+            my ($up, $near) = ($y * cos($tilt) - $z * sin($tilt), $y * sin($tilt) + $z * cos($tilt));
+            push @points, [ @{ centered_pixel($x, $up, 17) }, $i / $fibers, $near ];
+        }
+    }
+    my $canvas = glow_lines_canvas(\@points, \@ZETA_HUES, 0.6);
+    put_text($canvas, 0, 1, 'the Hopf fibration:', 97);
+    put_text($canvas, 1, 1, 'every circle linked', 94);
+    put_text($canvas, 2, 1, 'through every other', 94);
+    return $canvas;
+}
+
 # The (p, q) torus knot: a line wound round a doughnut, p times round the
 # hole and q times round the tube, closing up after one trip. When p and q
 # share no factor it's a single knotted loop. The tube has radius 1 and runs
@@ -2478,6 +2622,10 @@ our %PIECES = (
     lorenz     => { draw => \&lorenz_canvas,     about => 'the Lorenz attractor, the butterfly of chaos' },
     newton     => { draw => \&newton_canvas,     about => 'Newton\'s method on z^3 - 1, three basins with a fractal border' },
     ulam       => { draw => \&ulam_canvas,       about => 'the Ulam spiral, where the primes line up on diagonals' },
+    weierstrass => { draw => \&weierstrass_canvas, about => 'the Weierstrass function: continuous everywhere, smooth nowhere' },
+    voronoi    => { draw => \&voronoi_canvas,    about => 'a sunflower\'s seeds, each given the patch of head nearest it' },
+    clothoid   => { draw => \&clothoid_canvas,   about => 'the Euler spiral, which bends more the further along it you go' },
+    hopf       => { draw => \&hopf_canvas,       about => 'the Hopf fibration: circles on a doughnut, every one linked through every other' },
     burningship => { draw => \&burningship_canvas, about => 'the Burning Ship fractal, z^2 + c with the orbit folded' },
     dragon     => { draw => \&dragon_canvas,     about => 'the Heighway dragon, a strip of paper folded in half eight times' },
     spirograph => { draw => \&spirograph_canvas, about => 'a spirograph: a gear rolling inside a ring, drawing loops' },
