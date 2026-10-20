@@ -19,6 +19,8 @@ our %IRSSI = (
 #        /math -h           shows this usage
 #        /math <piece>      sends the piece to the current channel or query
 #        /math -p <piece>   previews the piece in your window without sending
+#        /math -r           sends a random piece (or --random)
+#        /math -p -r        previews a random piece
 #
 # The first time a piece is asked for it's drawn in the background, which can
 # take a few seconds; after that it's sent straight away.
@@ -2673,6 +2675,8 @@ my @USAGE = (
     '       /math -h           show this help',
     '       /math <piece>      send a piece to this channel or query',
     '       /math -p <piece>   preview a piece here without sending it',
+    '       /math -r           send a random piece (--random works too)',
+    '       /math -p -r        preview a random piece',
 );
 
 # Prints a line in the window the command came from, or in irssi's own
@@ -2715,6 +2719,11 @@ sub cmd_math {
     if ($name eq '-h') {
         show($witem, $_) for @USAGE;
         return;
+    }
+    if ($name eq '-r' || $name eq '--random') {
+        my @names = sort keys %PIECES;
+        $name = $names[ int rand @names ];
+        show($witem, "random piece: $name") if $witem;
     }
     if ($name =~ /^-/) {
         show($witem, qq{unknown option "$name"}, MSGLEVEL_CLIENTERROR);

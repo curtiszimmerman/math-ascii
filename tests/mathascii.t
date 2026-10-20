@@ -1067,6 +1067,34 @@ subtest 'cmd_math -p previews without sending' => sub {
     is_deeply $server->{sent}, [], 'nothing was sent';
 };
 
+subtest 'cmd_math -r sends a random piece' => sub {
+    # Every piece already drawn, as one line naming it, so we can tell which
+    # one went out without drawing them all.
+    %RENDERED = map { $_ => ["the $_ piece"] } keys %PIECES;
+    my %picked;
+    for my $option ('-r', '--random', ' -r ') {
+        for (1 .. 100) {
+            my $server = FakeServer->new;
+            my $item   = $server->add_item(name => '#math');
+            cmd_math($option, $server, $item);
+            my ($name) = ($item->{printed}[0][0] // '') =~ /^math: random piece: (\S+)$/;
+            ok $name && $PIECES{$name}, "$option says which piece it picked" or last;
+            is_deeply $server->{sent}, ["MSG #math the $name piece"], 'and sends that one' or last;
+            $picked{$name}++;
+        }
+    }
+    cmp_ok scalar(keys %picked), '>', 20, 'it picks different pieces';
+
+    my $server = FakeServer->new;
+    my $item   = $server->add_item(name => '#math');
+    cmd_math('-p -r', $server, $item);
+    my ($name) = $item->{printed}[0][0] =~ /^math: random piece: (\S+)$/;
+    is_deeply $item->{printed}, [ [ "math: random piece: $name", 'CLIENTCRAP' ], [ "the $name piece", 'CLIENTCRAP' ] ],
+        '-p -r previews a random piece';
+    is_deeply $server->{sent}, [], 'without sending it';
+    %RENDERED = ();
+};
+
 subtest 'requests made while a piece is drawing share the drawing' => sub {
     %RENDERED = ();
     my $server = FakeServer->new;
@@ -1118,6 +1146,8 @@ my @usage = (
     '       /math -h           show this help',
     '       /math <piece>      send a piece to this channel or query',
     '       /math -p <piece>   preview a piece here without sending it',
+    '       /math -r           send a random piece (--random works too)',
+    '       /math -p -r        preview a random piece',
 );
 
 subtest 'cmd_math refuses bad input' => sub {
