@@ -1020,6 +1020,69 @@ subtest 'plant_segments' => sub {
     }
 };
 
+subtest 'mandelbrot_nucleus' => sub {
+    my $returns = sub {
+        my ($cx, $cy, $period) = @_;
+        my ($x, $y) = (0, 0);
+        ($x, $y) = ($x * $x - $y * $y + $cx, 2 * $x * $y + $cy) for 1 .. $period;
+        return abs($x) < 1e-9 && abs($y) < 1e-9;
+    };
+    is_deeply rounded([ mandelbrot_nucleus(0.1, 0.1, 1) ]), [ 0, 0 ], 'the main cardioid\'s center is 0';
+    is_deeply rounded([ mandelbrot_nucleus(-0.9, 0, 2) ]), [ -1, 0 ], 'the big bulb\'s is -1';
+    my ($cx, $cy) = mandelbrot_nucleus(-1.75, 0, 3);
+    ok abs($cx**3 + 2 * $cx**2 + $cx + 1) < 1e-9 && abs($cy) < 1e-12, 'the period 3 copy on the real line solves c^3 + 2c^2 + c + 1 = 0';
+    ok $returns->($cx, $cy, 3), 'so 0 comes back to 0 after three steps';
+    ($cx, $cy) = mandelbrot_nucleus(-0.1, 0.7, 3);
+    ok $returns->($cx, $cy, 3) && $cy > 0.7, 'and the rabbit\'s c is one too, up off the line';
+};
+
+subtest 'euler_power_path' => sub {
+    my $pi   = 4 * atan2(1, 1);
+    my @path = euler_power_path(8);
+    is scalar @path, 9, 'from the 0th power up to the 8th';
+    is_deeply rounded($path[0]), [ 1, 0 ], 'starting at 1';
+    my @off = grep {
+        my ($x, $y) = @{ $path[ $_ - 1 ] };
+        abs($path[$_][0] - ($x - $y * $pi / 8)) > 1e-12 || abs($path[$_][1] - ($y + $x * $pi / 8)) > 1e-12;
+    } 1 .. 8;
+    is_deeply \@off, [], 'each point is the last times 1 + i pi/8';
+    my $end = (euler_power_path(20000))[-1];
+    ok abs($end->[0] + 1) < 1e-3 && abs($end->[1]) < 1e-3, 'with many steps, (1 + i pi/n)^n comes to -1';
+};
+
+subtest 'field_line' => sub {
+    my $pi   = 4 * atan2(1, 1);
+    my @line = field_line(1);
+    ok sqrt(($line[0][0] + 1)**2 + $line[0][1]**2) < 0.11, 'it leaves from the positive charge';
+    ok sqrt(($line[-1][0] - 1)**2 + $line[-1][1]**2) < 0.11, 'and ends on the negative one';
+    my $flux = sub { my ($x, $y) = @{ $_[0] }; ($x + 1) / sqrt(($x + 1)**2 + $y**2) - ($x - 1) / sqrt(($x - 1)**2 + $y**2) };
+    my $start = $flux->($line[0]);
+    is_deeply [ grep { abs($flux->($_) - $start) > 1e-6 } @line ], [], 'along the way cos a - cos b never changes, a and b the angles at the two charges';
+    my $mirror = sub { my ($k) = @_; abs($line[$k][0] + $line[ -1 - $k ][0]) < 0.02 && abs($line[$k][1] - $line[ -1 - $k ][1]) < 0.02 };
+    ok $mirror->(0) && $mirror->(int(@line / 4)), 'and its two halves mirror each other';
+    is_deeply [ grep { $_->[1] <= 0 } @line ], [], 'it never crosses the line through the charges';
+};
+
+subtest 'pursuit_polygons' => sub {
+    my $pi       = 4 * atan2(1, 1);
+    my @polygons = pursuit_polygons(4, 0.05, 30);
+    is scalar @polygons, 31, 'the start and every step';
+    my $side = sub { my ($p, $q) = @_; sqrt(($p->[0] - $q->[0])**2 + ($p->[1] - $q->[1])**2) };
+    my @lopsided = grep {
+        my $polygon = $_;
+        my @sides   = map { $side->($polygon->[$_], $polygon->[ ($_ + 1) % 4 ]) } 0 .. 3;
+        List::Util::max(@sides) - List::Util::min(@sides) > 1e-9 || abs($side->($polygon->[0], $polygon->[2]) - sqrt(2) * $sides[0]) > 1e-9;
+    } @polygons;
+    is_deeply \@lopsided, [], 'the four bugs are always at the corners of a square';
+    for my $n (3, 4, 6) {
+        my @slow   = pursuit_polygons($n, 0.0002, 100000);
+        my $walked = 0;
+        $walked += $side->($slow[$_][0], $slow[ $_ - 1 ][0]) for 1 .. $#slow;
+        my $first = $side->(@{ $slow[0] }[ 0, 1 ]);
+        ok abs($walked - $first / (1 - cos(2 * $pi / $n))) < 1e-3 * $first, "$n bugs each walk side / (1 - cos(2 pi / $n)) to meet";
+    }
+};
+
 subtest 'mobius_point' => sub {
     my $pi    = 4 * atan2(1, 1);
     my $close = sub { my ($p, $q) = @_; !(grep { abs($p->[$_] - $q->[$_]) > 1e-9 } 0 .. 2) };

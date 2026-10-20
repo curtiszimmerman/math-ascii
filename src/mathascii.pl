@@ -2000,6 +2000,79 @@ sub ellipse_bounces {
     return @bounces;
 }
 
+# The center of one of the little copies of the Mandelbrot set: the c where
+# 0 comes back to 0 after $period steps of z -> z^2 + c. Found by Newton's
+# method from a guess, carrying the derivative of z with respect to c along.
+# Returns (x, y).
+sub mandelbrot_nucleus {
+    my ($cx, $cy, $period) = @_;
+    for (1 .. 100) {
+        my ($x, $y, $dx, $dy) = (0, 0, 0, 0);
+        for (1 .. $period) {
+            ($dx, $dy) = (2 * ($x * $dx - $y * $dy) + 1, 2 * ($x * $dy + $y * $dx));
+            ($x, $y)   = ($x * $x - $y * $y + $cx, 2 * $x * $y + $cy);
+        }
+        my $size = $dx**2 + $dy**2;
+        my ($step_x, $step_y) = (($x * $dx + $y * $dy) / $size, ($y * $dx - $x * $dy) / $size);
+        ($cx, $cy) = ($cx - $step_x, $cy - $step_y);
+        last if abs($step_x) + abs($step_y) < 1e-15;
+    }
+    return ($cx, $cy);
+}
+
+# The powers of 1 + i pi/$n from the 0th to the nth, as [x, y]. Each one
+# turns a little and grows a little, and as $n grows the nth power comes to
+# e^(i pi) = -1.
+sub euler_power_path {
+    my ($n) = @_;
+    my $turn = 4 * atan2(1, 1) / $n;
+    my @path = ([ 1, 0 ]);
+    push @path, [ $path[-1][0] - $path[-1][1] * $turn, $path[-1][1] + $path[-1][0] * $turn ] for 1 .. $n;
+    return @path;
+}
+
+# A line of the electric field of a charge of +1 at (-1, 0) and -1 at (1, 0),
+# leaving the positive charge at $angle radians and followed in small steps
+# until it reaches the negative one or wanders off. Returns its points as
+# [x, y].
+sub field_line {
+    my ($angle) = @_;
+    my ($start, $step) = (0.1, 0.01);
+    my $direction = sub {
+        my ($x, $y) = @_;
+        my ($near, $far) = ((($x + 1)**2 + $y**2)**1.5, (($x - 1)**2 + $y**2)**1.5);
+        my ($ex, $ey) = (($x + 1) / $near - ($x - 1) / $far, $y / $near - $y / $far);
+        my $size = sqrt($ex**2 + $ey**2);
+        return ($ex / $size, $ey / $size);
+    };
+    my @line = ([ -1 + $start * cos $angle, $start * sin $angle ]);
+    for (1 .. 5000) {
+        my ($x, $y) = rk4_step($direction, $line[-1], $step);
+        push @line, [ $x, $y ];
+        last if ($x - 1)**2 + $y**2 < $start**2 || $x**2 + $y**2 > 25;
+    }
+    return @line;
+}
+
+# Bugs at the corners of a regular polygon of radius 1, each always heading
+# for the next one round. Every step each moves $fraction of the way to the
+# bug it's chasing, so they spiral into the middle and the polygon shrinks
+# and turns. Returns the polygon before the first step and after each, as
+# lists of corners [x, y].
+sub pursuit_polygons {
+    my ($n, $fraction, $steps) = @_;
+    my $pi       = 4 * atan2(1, 1);
+    my @polygons = ([ map { [ cos(2 * $pi * $_ / $n + $pi / 2), sin(2 * $pi * $_ / $n + $pi / 2) ] } 0 .. $n - 1 ]);
+    for (1 .. $steps) {
+        my $last = $polygons[-1];
+        push @polygons, [ map {
+            my ($bug, $target) = ($last->[$_], $last->[ ($_ + 1) % $n ]);
+            [ $bug->[0] + $fraction * ($target->[0] - $bug->[0]), $bug->[1] + $fraction * ($target->[1] - $bug->[1]) ];
+        } 0 .. $n - 1 ];
+    }
+    return @polygons;
+}
+
 # A Mobius strip: a band round the unit circle that makes half a twist as it
 # goes. $u is how far round (in radians) and $v how far across from the
 # middle of the band. Returns [x, y, z].
