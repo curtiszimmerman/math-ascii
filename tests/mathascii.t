@@ -1020,6 +1020,67 @@ subtest 'plant_segments' => sub {
     }
 };
 
+subtest 'mobius_point' => sub {
+    my $pi    = 4 * atan2(1, 1);
+    my $close = sub { my ($p, $q) = @_; !(grep { abs($p->[$_] - $q->[$_]) > 1e-9 } 0 .. 2) };
+    ok !(grep { !$close->(mobius_point($_ + 2 * $pi, 0.3), mobius_point($_, -0.3)) } 0.2, 1.7, 4), 'once round, the strip comes back flipped over';
+    ok !(grep { !$close->(mobius_point($_, 0), [ cos $_, sin $_, 0 ]) } 0.2, 1.7, 4), 'its middle is the unit circle';
+    ok !$close->(mobius_point(0.5, 0.3), mobius_point(0.5 + 2 * $pi, 0.3)), 'so the edge isn\'t back where it started after one turn';
+    ok $close->(mobius_point(0.5, 0.3), mobius_point(0.5 + 4 * $pi, 0.3)), 'but is after two: it has only one edge';
+};
+
+subtest 'circle_through' => sub {
+    is_deeply rounded(circle_through([ 1, 0 ], [ 0, 1 ], [ -1, 0 ])), [ 0, 0, 1 ], 'the unit circle';
+    is_deeply rounded(circle_through([ 3, 2 ], [ 1, 4 ], [ -1, 2 ])), [ 1, 2, 2 ], 'a circle of radius 2 round (1, 2)';
+};
+
+subtest 'steiner_chain' => sub {
+    for my $turn (0, 0.1, 0.25) {
+        my ($outer, $inner, @chain) = steiner_chain(9, 0.4, $turn);
+        is scalar @chain, 9, "nine circles in the chain (turned $turn)";
+        my $gap = sub { my ($p, $q) = @_; sqrt(($p->[0] - $q->[0])**2 + ($p->[1] - $q->[1])**2) };
+        is_deeply [ grep { abs($gap->($chain[$_], $chain[ $_ - 1 ]) - $chain[$_][2] - $chain[ $_ - 1 ][2]) > 1e-9 } 0 .. 8 ], [],
+            'each touches the next, all the way round';
+        is_deeply [ grep { abs($gap->($_, $inner) - $_->[2] - $inner->[2]) > 1e-9 } @chain ], [], 'each touches the inner circle';
+        is_deeply [ grep { abs($outer->[2] - $gap->($_, $outer) - $_->[2]) > 1e-9 } @chain ], [], 'and the outer one from inside';
+    }
+    my ($outer, $inner) = steiner_chain(9, 0.4, 0);
+    ok abs($outer->[0] - $inner->[0]) > 0.1, 'the inner circle is off center';
+};
+
+subtest 'kepler' => sub {
+    my $pi = 4 * atan2(1, 1);
+    for my $mean (0.3, 2, 5.5) {
+        my $eccentric = eccentric_anomaly($mean, 0.7);
+        ok abs($eccentric - 0.7 * sin($eccentric) - $mean) < 1e-12, "solves Kepler's equation E - e sin E = M (M = $mean)";
+    }
+    is_deeply rounded(orbit_position(0, 0.7)), [ 0.3, 0 ], 'it starts closest to the sun, at the focus';
+    is_deeply rounded(orbit_position(0.5, 0.7)), [ -1.7, 0 ], 'and is furthest away half a year later';
+    my @slices = map {
+        my ($from, $to) = ($_ / 12, ($_ + 1) / 12);
+        my @arc = map { orbit_position($from + ($to - $from) * $_ / 2000, 0.7) } 0 .. 2000;
+        my $area = 0;
+        $area += ($arc[ $_ - 1 ][0] * $arc[$_][1] - $arc[$_][0] * $arc[ $_ - 1 ][1]) / 2 for 1 .. $#arc;
+        $area;
+    } 0 .. 11;
+    my $share = $pi * sqrt(1 - 0.7**2) / 12;
+    is_deeply [ grep { abs($_ - $share) > 1e-6 } @slices ], [], 'the line to the sun sweeps equal areas in equal times';
+};
+
+subtest 'fibonacci_word_path' => sub {
+    is lsystem_moves('0', { 0 => '01', 1 => '0' }, 5), '0100101001001', 'the Fibonacci word';
+    my @fibonacci = (1, 2);
+    push @fibonacci, $fibonacci[-1] + $fibonacci[-2] for 1 .. 12;
+    for my $order (6, 10, 13) {
+        my @path = fibonacci_word_path($order);
+        is scalar @path, $fibonacci[$order] + 1, "order $order takes a Fibonacci number of steps";
+        is_deeply [ grep { abs(abs($path[$_][0] - $path[ $_ - 1 ][0]) + abs($path[$_][1] - $path[ $_ - 1 ][1]) - 1) > 1e-9 } 1 .. $#path ], [],
+            'every step is one long, across or up and down';
+        my %seen;
+        is_deeply [ grep { $seen{ join ',', map { POSIX::floor($_ + 0.5) } @$_ }++ } @path ], [], 'and it never comes back to a corner it has been to';
+    }
+};
+
 subtest 'ellipse_bounces' => sub {
     my $pi = 4 * atan2(1, 1);
     my ($a, $b) = (2, 1.2);

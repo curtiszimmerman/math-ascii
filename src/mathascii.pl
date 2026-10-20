@@ -2000,6 +2000,91 @@ sub ellipse_bounces {
     return @bounces;
 }
 
+# A Mobius strip: a band round the unit circle that makes half a twist as it
+# goes. $u is how far round (in radians) and $v how far across from the
+# middle of the band. Returns [x, y, z].
+sub mobius_point {
+    my ($u, $v) = @_;
+    my $out = 1 + $v * cos($u / 2);
+    return [ $out * cos $u, $out * sin $u, $v * sin($u / 2) ];
+}
+
+# The circle through three points, as [x, y, radius].
+sub circle_through {
+    my ($p, $q, $r) = @_;
+    my ($x1, $y1, $x2, $y2, $x3, $y3) = (@$p, @$q, @$r);
+    my $d = 2 * ($x1 * ($y2 - $y3) + $x2 * ($y3 - $y1) + $x3 * ($y1 - $y2));
+    my ($s1, $s2, $s3) = ($x1**2 + $y1**2, $x2**2 + $y2**2, $x3**2 + $y3**2);
+    my $x = ($s1 * ($y2 - $y3) + $s2 * ($y3 - $y1) + $s3 * ($y1 - $y2)) / $d;
+    my $y = ($s1 * ($x3 - $x2) + $s2 * ($x1 - $x3) + $s3 * ($x2 - $x1)) / $d;
+    return [ $x, $y, sqrt(($x1 - $x)**2 + ($y1 - $y)**2) ];
+}
+
+# A Steiner chain: $count circles in a ring between an outer and an inner
+# circle, each touching both and its two neighbors. Between two circles
+# centered on each other it's easy: the ring just fits when the inner
+# radius is (1 - s)/(1 + s), with s = sin(pi/$count). Then the map
+# z -> (z + a)/(1 + az) slides the inner circle off center by an amount set
+# by $shift. It keeps the unit circle where it is and takes circles to
+# circles, so everything still touches. $turn spins the ring round first, in
+# whole turns. Steiner's porism is that it works however far you turn it.
+# Returns the outer circle, the inner one and the chain, each [x, y, radius].
+sub steiner_chain {
+    my ($count, $shift, $turn) = @_;
+    my $pi     = 4 * atan2(1, 1);
+    my $s      = sin($pi / $count);
+    my $inner  = (1 - $s) / (1 + $s);
+    my $radius = (1 - $inner) / 2;
+    my $slide  = sub {
+        my ($x, $y) = @_;
+        my ($top_x, $top_y, $bottom_x, $bottom_y) = ($x + $shift, $y, 1 + $shift * $x, $shift * $y);
+        my $size = $bottom_x**2 + $bottom_y**2;
+        return [ ($top_x * $bottom_x + $top_y * $bottom_y) / $size, ($top_y * $bottom_x - $top_x * $bottom_y) / $size ];
+    };
+    my $moved = sub {
+        my ($x, $y, $r) = @_;
+        return circle_through(map { $slide->($x + $r * cos($_), $y + $r * sin($_)) } 0, 2 * $pi / 3, 4 * $pi / 3);
+    };
+    my @chain = map {
+        my $angle = 2 * $pi * ($_ / $count + $turn);
+        $moved->(($inner + $radius) * cos $angle, ($inner + $radius) * sin $angle, $radius);
+    } 0 .. $count - 1;
+    return ($moved->(0, 0, 1), $moved->(0, 0, $inner), @chain);
+}
+
+# Kepler's equation, E - e sin E = M: the mean anomaly M grows evenly with
+# time, and the eccentric anomaly E is where the planet really is on its
+# ellipse. There's no formula for E, so it's found by Newton's method.
+sub eccentric_anomaly {
+    my ($mean, $e) = @_;
+    my $eccentric = $mean + $e * sin $mean;
+    for (1 .. 100) {
+        my $step = ($eccentric - $e * sin($eccentric) - $mean) / (1 - $e * cos $eccentric);
+        $eccentric -= $step;
+        last if abs($step) < 1e-15;
+    }
+    return $eccentric;
+}
+
+# Where a planet is $t of a year after it passed closest to the sun, on an
+# orbit of eccentricity $e and long radius 1, as [x, y] with the sun at the
+# origin.
+sub orbit_position {
+    my ($t, $e) = @_;
+    my $eccentric = eccentric_anomaly(8 * atan2(1, 1) * $t, $e);
+    return [ cos($eccentric) - $e, sqrt(1 - $e**2) * sin $eccentric ];
+}
+
+# The Fibonacci word fractal: write out the Fibonacci word (0 -> 01, 1 -> 0)
+# and take a step for every digit. After a 0, turn left if it was an
+# even-numbered digit and right if odd. Returns the corners as [x, y].
+sub fibonacci_word_path {
+    my ($order) = @_;
+    my @digits = split //, lsystem_moves('0', { 0 => '01', 1 => '0' }, $order);
+    my $moves  = join '', map { 'F' . ($digits[ $_ - 1 ] ? '' : $_ % 2 ? '-' : '+') } 1 .. @digits;
+    return ([ 0, 0 ], map { $_->[1] } turtle_segments($moves, 90));
+}
+
 # The C curve, order 10, its hue running along it.
 sub levy_canvas {
     my @path   = levy_path(10);
