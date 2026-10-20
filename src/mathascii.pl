@@ -3849,6 +3849,96 @@ sub julia_canvas {
     return $canvas;
 }
 
+# Ushiki's Phoenix with the classic p = 0.5667 and q = -0.5, stood up by
+# swapping x and y. The set itself is dust, so it's all glow, from deep red
+# through orange to white.
+my @PHOENIX_GLOW = (
+    [ 0,    71,  0,   0 ],
+    [ 0.35, 180, 0,   0 ],
+    [ 0.6,  255, 100, 0 ],
+    [ 0.8,  255, 200, 0 ],
+    [ 1,    255, 255, 220 ],
+);
+
+sub phoenix_canvas {
+    my $canvas = escape_view(
+        center_x  => 0, center_y => 0, half_height => 1.6,
+        glow_from => 2, glow_to  => 40, glow => \@PHOENIX_GLOW,
+        escape    => sub { phoenix_escape($_[1], $_[0], 0.5667, -0.5, 200) },
+    );
+    put_text($canvas, 0, 1, 'the Phoenix:',          97);
+    put_text($canvas, 1, 1, "z -> z^2 + c + pz'",    94);
+    put_text($canvas, 2, 1, 'c = 0.5667, p = -0.5',  94);
+    return $canvas;
+}
+
+# The Gaussian primes near 0, each a + bi two pixels across and one down so
+# it draws square, colored by size like the Ulam spiral. They have the
+# symmetry of a square, and 0 is marked in white.
+sub gaussian_canvas {
+    my $is_prime = primes_up_to(35**2 + 24**2);
+    my @palette  = gradient_palette(\@ULAM_HUES);
+    my @pixels   = map {
+        my $b = 24 - $_;
+        [ map {
+            my $a = int($_ / 2) - 35;
+            $a == 0 && $b == 0 ? 98
+                : gaussian_prime($a, $b, $is_prime) ? nearest_color_in(\@palette, gradient_rgb(\@ULAM_HUES, sqrt(($a * $a + $b * $b) / (35**2 + 24**2))))
+                : $BLACK;
+        } 0 .. 139 ];
+    } 0 .. 47;
+    return pixels_to_canvas(\@pixels);
+}
+
+# Light pouring in from the left onto the inside of a round cup and
+# bouncing off it. 400 reflected rays, colored by how many cross each
+# pixel, bunch up along the nephroid, the bright shape with a point in the
+# middle that you see at the bottom of a coffee cup.
+sub caustic_canvas {
+    my ($rays, $scale) = (400, 44);
+    my $pi = 4 * atan2(1, 1);
+    my %crossings;
+    for my $k (1 .. $rays) {
+        my $theta = $pi * ($k / ($rays + 1) - 0.5);
+        my ($hit, $direction) = cup_reflection($theta);
+        my $end = [ map { $hit->[$_] + 2 * cos($theta) * $direction->[$_] } 0, 1 ];
+        my %crossed = map { POSIX::floor($_->[0] + 0.5) . ',' . POSIX::floor($_->[1] + 0.5) => 1 }
+            line_points(centered_pixel(@$hit, $scale), centered_pixel(@$end, $scale), 0);
+        $crossings{$_}++ for keys %crossed;
+    }
+    my $canvas = density_canvas(\%crossings, \@PHOENIX_GLOW, 0.99, 1.6);
+    put_text($canvas, 0, 1, 'light in a',        97);
+    put_text($canvas, 1, 1, 'coffee cup:',       97);
+    put_text($canvas, 2, 1, 'a nephroid',        94);
+    return $canvas;
+}
+
+# The hydrogen 4d orbital with m = 0 (n = 4, l = 2), sliced through the
+# nucleus with the z axis across. Warm where the wave is positive and cool
+# where it's negative, in three shades by how strong it is, with black on
+# the cones and the sphere where it's zero.
+my @ORBITAL_WARM = map { nearest_color(@$_) } [ 120, 30, 0 ], [ 255, 120, 0 ], [ 255, 230, 120 ];
+my @ORBITAL_COOL = map { nearest_color(@$_) } [ 0, 30, 120 ], [ 0, 120, 255 ], [ 150, 230, 255 ];
+
+sub orbital_canvas {
+    my ($n, $l, $m, $size) = (4, 2, 0, 0.32);
+    my @wave = map {
+        my $x = (23.5 - $_) * 2 * $size;
+        [ map { hydrogen_wave($n, $l, $m, $x, ($_ - 69.5) * $size) } 0 .. 139 ];
+    } 0 .. 47;
+    my $strongest = List::Util::max(map { map { abs } @$_ } @wave);
+    my @pixels = map {
+        [ map {
+            my $level = POSIX::floor(3 * sqrt(abs($_) / $strongest) - 0.3);
+            $level < 0 ? $BLACK : ($_ > 0 ? \@ORBITAL_WARM : \@ORBITAL_COOL)->[ List::Util::min(2, $level) ];
+        } @$_ ];
+    } @wave;
+    my $canvas = pixels_to_canvas(\@pixels);
+    put_text($canvas, 0, 1, 'a hydrogen atom:', 97);
+    put_text($canvas, 1, 1, 'the 4d orbital',   94);
+    return $canvas;
+}
+
 our %PIECES = (
     mandelbrot => { draw => \&mandelbrot_canvas, about => 'the whole Mandelbrot set, glowing toward its edge' },
     seahorse   => { draw => \&seahorse_canvas,   about => 'a seahorse tail in Seahorse Valley, 600 times closer' },
@@ -3888,6 +3978,10 @@ our %PIECES = (
     euler      => { draw => \&euler_canvas,      about => 'Euler\'s identity: (1 + i pi/n)^n walking round to -1 as n grows' },
     dipole     => { draw => \&dipole_canvas,     about => 'the field lines of a positive and a negative charge' },
     pursuit    => { draw => \&pursuit_canvas,    about => 'four bugs at the corners of a square, each chasing the next into a whirl' },
+    phoenix    => { draw => \&phoenix_canvas,    about => 'the Phoenix fractal, where each step remembers the one before' },
+    gaussian   => { draw => \&gaussian_canvas,   about => 'the Gaussian primes: the primes among the complex numbers a + bi' },
+    caustic    => { draw => \&caustic_canvas,    about => 'the bright cusped curve that light draws in the bottom of a coffee cup' },
+    orbital    => { draw => \&orbital_canvas,    about => 'a slice through a hydrogen atom\'s 4d orbital' },
     hopf       => { draw => \&hopf_canvas,       about => 'the Hopf fibration: circles on a doughnut, every one linked through every other' },
     burningship => { draw => \&burningship_canvas, about => 'the Burning Ship fractal, z^2 + c with the orbit folded' },
     dragon     => { draw => \&dragon_canvas,     about => 'the Heighway dragon, a strip of paper folded in half eight times' },

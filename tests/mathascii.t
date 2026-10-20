@@ -1515,7 +1515,7 @@ subtest 'cmd_math with no piece lists the pieces' => sub {
     my $server = FakeServer->new;
     my $item   = FakeItem->new;
     cmd_math('', $server, $item);
-    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian billiard buddhabrot burningship butterfly cantor chladni clifford clothoid collatz conformal cycloid dipole dragon drum elephant euler fern fibword ford fourier golden gosper harmonograph hilbert hopf hyperbolic julia kepler knot koch langton levy life logistic lorenz lyapunov mandelbrot maurer minibrot mobius newton pascal pendulum penrose phase piwalk plant pursuit pythagoras quasicrystal recaman ripples rossler rule30 sandpile seahorse spirograph steiner sunflower tesseract theodorus threebody timestable tongues tricorn truchet ulam voronoi weierstrass zeta', 'CLIENTCRAP' ] ];
+    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian billiard buddhabrot burningship butterfly cantor caustic chladni clifford clothoid collatz conformal cycloid dipole dragon drum elephant euler fern fibword ford fourier gaussian golden gosper harmonograph hilbert hopf hyperbolic julia kepler knot koch langton levy life logistic lorenz lyapunov mandelbrot maurer minibrot mobius newton orbital pascal pendulum penrose phase phoenix piwalk plant pursuit pythagoras quasicrystal recaman ripples rossler rule30 sandpile seahorse spirograph steiner sunflower tesseract theodorus threebody timestable tongues tricorn truchet ulam voronoi weierstrass zeta', 'CLIENTCRAP' ] ];
     is_deeply $server->{sent}, [], 'nothing was sent';
 };
 
@@ -1546,6 +1546,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'burningship   the Burning Ship fractal, z^2 + c with the orbit folded',
             'butterfly     Fay\'s butterfly curve, twelve turns of a polar curve',
             'cantor        the devil\'s staircase, climbing only on the Cantor set',
+            'caustic       the bright cusped curve that light draws in the bottom of a coffee cup',
             'chladni       sand on a ringing metal plate, gathered on the lines that stand still',
             'clifford      a Clifford strange attractor, drawn like smoke',
             'clothoid      the Euler spiral, which bends more the further along it you go',
@@ -1561,6 +1562,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'fibword       the Fibonacci word fractal: a turn after every 0 in 0100101001001...',
             'ford          Ford circles: a circle on every fraction, and neighbors always touch',
             'fourier       a square wave built from sine waves, overshooting at every corner',
+            'gaussian      the Gaussian primes: the primes among the complex numbers a + bi',
             'golden        the golden spiral, drawn through squares whose sides are the Fibonacci numbers',
             'gosper        the flowsnake: Gosper\'s curve, seven copies of itself on a hexagonal grid',
             'harmonograph  two damped pendulums drawing on paper, spiraling in as they tire',
@@ -1582,10 +1584,12 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'minibrot      a tiny copy of the Mandelbrot set, out on its needle',
             'mobius        a Mobius strip: a band with a half twist, so it has one side and one edge',
             'newton        Newton\'s method on z^3 - 1, three basins with a fractal border',
+            'orbital       a slice through a hydrogen atom\'s 4d orbital',
             'pascal        Pascal\'s triangle mod 2, which turns out to be Sierpinski\'s',
             'pendulum      a double pendulum swinging wildly for thirty seconds',
             'penrose       a Penrose tiling: two rhombs covering the plane without ever repeating',
             'phase         a phase portrait: zeros and poles of a complex function as color pinwheels',
+            'phoenix       the Phoenix fractal, where each step remembers the one before',
             'piwalk        a walk steered by the first thousand digits of pi',
             'plant         Lindenmayer\'s fractal plant, grown by rewriting a string of turtle moves',
             'pursuit       four bugs at the corners of a square, each chasing the next into a whirl',
@@ -1731,7 +1735,7 @@ my @usage = (
 subtest 'cmd_math refuses bad input' => sub {
     my $item = FakeItem->new;
     cmd_math('nope', FakeServer->new, $item);
-    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian billiard buddhabrot burningship butterfly cantor chladni clifford clothoid collatz conformal cycloid dipole dragon drum elephant euler fern fibword ford fourier golden gosper harmonograph hilbert hopf hyperbolic julia kepler knot koch langton levy life logistic lorenz lyapunov mandelbrot maurer minibrot mobius newton pascal pendulum penrose phase piwalk plant pursuit pythagoras quasicrystal recaman ripples rossler rule30 sandpile seahorse spirograph steiner sunflower tesseract theodorus threebody timestable tongues tricorn truchet ulam voronoi weierstrass zeta', 'CLIENTERROR' ] ],
+    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian billiard buddhabrot burningship butterfly cantor caustic chladni clifford clothoid collatz conformal cycloid dipole dragon drum elephant euler fern fibword ford fourier gaussian golden gosper harmonograph hilbert hopf hyperbolic julia kepler knot koch langton levy life logistic lorenz lyapunov mandelbrot maurer minibrot mobius newton orbital pascal pendulum penrose phase phoenix piwalk plant pursuit pythagoras quasicrystal recaman ripples rossler rule30 sandpile seahorse spirograph steiner sunflower tesseract theodorus threebody timestable tongues tricorn truchet ulam voronoi weierstrass zeta', 'CLIENTERROR' ] ],
         'unknown piece';
 
     @printed = ();
