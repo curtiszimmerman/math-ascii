@@ -58,7 +58,7 @@ package FakeItem {
 
 package main;
 
-our ($ZETA_T_MAX, @ZETA_HUES, %PIECES, @QUADRANT, %RENDERED, $GOLDEN_ANGLE, $GOSPER_GUN, $SANDPILE_GRAINS, $SANDPILE_SIZE);
+our ($ZETA_T_MAX, @ZETA_HUES, %PIECES, @QUADRANT, %RENDERED, @SHUFFLE_BAG, $GOLDEN_ANGLE, $GOSPER_GUN, $SANDPILE_GRAINS, $SANDPILE_SIZE);
 my $script = "$FindBin::Bin/../src/mathascii.pl";
 do $script or die "could not load $script: " . ($@ || $!);
 
@@ -1715,19 +1715,24 @@ subtest 'cmd_math -r sends a random piece' => sub {
     # Every piece already drawn, as one line naming it, so we can tell which
     # one went out without drawing them all.
     %RENDERED = map { $_ => ["the $_ piece"] } keys %PIECES;
-    my %picked;
+    @SHUFFLE_BAG = ();
+    my $all = join ' ', sort keys %PIECES;
+    my @runs;
     for my $option ('-r', '--random', ' -r ') {
-        for (1 .. 100) {
+        my @picked;
+        for (1 .. keys %PIECES) {
             my $server = FakeServer->new;
             my $item   = $server->add_item(name => '#math');
             cmd_math($option, $server, $item);
             my ($name) = ($item->{printed}[0][0] // '') =~ /^math: random piece: (\S+)$/;
             ok $name && $PIECES{$name}, "$option says which piece it picked" or last;
             is_deeply $server->{sent}, ["MSG #math the $name piece"], 'and sends that one' or last;
-            $picked{$name}++;
+            push @picked, $name;
         }
+        is join(' ', sort @picked), $all, "as many $option in a row as there are pieces send every piece once";
+        push @runs, "@picked";
     }
-    cmp_ok scalar(keys %picked), '>', 20, 'it picks different pieces';
+    isnt $runs[0], $runs[1], 'in a new order each time round';
 
     my $server = FakeServer->new;
     my $item   = $server->add_item(name => '#math');

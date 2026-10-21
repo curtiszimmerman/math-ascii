@@ -4206,6 +4206,11 @@ sub show {
 our %RENDERED;
 my %drawing;
 
+# The pieces /math -r hasn't picked yet this time round, in a shuffled order.
+# Picking each one independently brings the same few back again and again, so
+# instead it goes through every piece once before any comes up twice.
+our @SHUFFLE_BAG;
+
 sub cmd_math {
     my ($data, $server, $witem) = @_;
 
@@ -4228,8 +4233,8 @@ sub cmd_math {
         return;
     }
     if ($name eq '-r' || $name eq '--random') {
-        my @names = sort keys %PIECES;
-        $name = $names[ int rand @names ];
+        @SHUFFLE_BAG = List::Util::shuffle(keys %PIECES) unless @SHUFFLE_BAG;
+        $name = shift @SHUFFLE_BAG;
         show($witem, "random piece: $name") if $witem;
     }
     if ($name =~ /^-/) {
