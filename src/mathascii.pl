@@ -1984,6 +1984,15 @@ sub terdragon_path {
     return ([ 0, 0 ], map { $_->[1] } turtle_segments(lsystem_moves('F', { F => 'F+F-F' }, $order), 120));
 }
 
+# Sierpinski's arrowhead curve: A -> B-A-B and B -> A+B+A with 60 degree
+# turns. One line that wanders through every little triangle of Sierpinski's
+# triangle and stays out of the holes. Returns its corners as [x, y],
+# starting at the origin heading east.
+sub arrowhead_path {
+    my ($order) = @_;
+    return ([ 0, 0 ], map { $_->[1] } turtle_segments(lsystem_moves('A', { A => 'B-A-B', B => 'A+B+A' }, $order), 60));
+}
+
 # Lindenmayer's fractal plant: X -> F+[[X]-X]-F[-X]+X and F -> FF with 25
 # degree turns. X is a bud that only shapes the growth, so it's taken out
 # before the turtle walks and the steps are all stems.
@@ -3653,9 +3662,11 @@ sub rossler_canvas {
 # (|Re z| + i|Im z|) before squaring, which makes the Burning Ship. With
 # $conjugate set, z is flipped to its complex conjugate before squaring, which
 # makes the Tricorn. Both only change the sign of the 2xy term, so that's all
-# they touch.
+# they touch. With $power over 2, it follows z -> z^$power + c instead, a
+# Multibrot set, by multiplying the square by z until it's that power.
 sub escape_time {
-    my ($x, $y, $cx, $cy, $max_steps, $fold, $conjugate) = @_;
+    my ($x, $y, $cx, $cy, $max_steps, $fold, $conjugate, $power) = @_;
+    $power //= 2;
 
     # Bounded orbits settle into a cycle. We remember z at steps 1, 2, 4,
     # 8, ... and if z ever comes back to the remembered value, it's caught in a
@@ -3664,9 +3675,18 @@ sub escape_time {
     my ($seen_x, $seen_y, $next_check) = ($x, $y, 1);
     for my $step (1 .. $max_steps) {
         my $xy = $fold ? abs($x * $y) : $conjugate ? -$x * $y : $x * $y;
-        ($x, $y) = ($x * $x - $y * $y + $cx, 2 * $xy + $cy);
+        # Squaring alone is the hot loop of every Mandelbrot-like piece, and
+        # the general case slows it by a third, so it keeps its own line.
+        if ($power == 2) {
+            ($x, $y) = ($x * $x - $y * $y + $cx, 2 * $xy + $cy);
+        }
+        else {
+            my ($zx, $zy) = ($x * $x - $y * $y, 2 * $xy);
+            ($zx, $zy) = ($zx * $x - $zy * $y, $zx * $y + $zy * $x) for 3 .. $power;
+            ($x, $y) = ($zx + $cx, $zy + $cy);
+        }
         my $size = $x * $x + $y * $y;
-        return $step + 1 - log(log($size) / 2) / log(2) if $size > 65536;
+        return $step + 1 - log(log($size) / 2) / log($power) if $size > 65536;
         return if abs($x - $seen_x) < 1e-13 && abs($y - $seen_y) < 1e-13;
         if ($step == $next_check) {
             ($seen_x, $seen_y) = ($x, $y);
@@ -4087,6 +4107,120 @@ sub klein_canvas {
     return $canvas;
 }
 
+# The arrowhead curve, order 6, hued along its length.
+sub arrowhead_canvas {
+    my @path   = arrowhead_path(6);
+    my $pixel  = fit_to_frame(\@path);
+    my @points = map { line_points($pixel->(@{ $path[ $_ - 1 ] }), $pixel->(@{ $path[$_] }), $_ / $#path) } 1 .. $#path;
+    my $canvas = glow_lines_canvas(\@points, \@ZETA_HUES, 0.5);
+    put_text($canvas, 0, 1, 'Sierpinski\'s',   97);
+    put_text($canvas, 1, 1, 'arrowhead curve', 94);
+    return $canvas;
+}
+
+# Henon's map, (x, y) -> (1 - 1.4x^2 + y, 0.3x): it stretches, folds and
+# squashes the plane, and its points settle onto a strange attractor shaped
+# like a boomerang, made of layers within layers. Returns $count points
+# [x, y] on it, after letting the first hundred settle.
+sub henon_points {
+    my ($count) = @_;
+    my ($x, $y) = (0, 0);
+    my @points;
+    for my $step (1 .. 100 + $count) {
+        ($x, $y) = (1 - 1.4 * $x**2 + $y, 0.3 * $x);
+        push @points, [ $x, $y ] if $step > 100;
+    }
+    return @points;
+}
+
+# The attractor is about 2.6 wide and 0.8 tall, so it's stretched to fill
+# the frame, colored by how often a point lands on each pixel.
+sub henon_canvas {
+    my %hits;
+    for my $point (henon_points(100_000)) {
+        my ($x, $y) = @$point;
+        $hits{ POSIX::floor(24 - $y * 55) . ',' . POSIX::floor(70 + $x * 52) }++;
+    }
+    my $canvas = density_canvas(\%hits, \@CLIFFORD_GLOW, 0.95, 0.5);
+    put_text($canvas, 21, 46, 'the Henon attractor:', 97);
+    put_text($canvas, 22, 46, 'x -> 1 - 1.4x^2 + y',  94);
+    put_text($canvas, 23, 46, 'y -> 0.3x',            94);
+    return $canvas;
+}
+
+# The Multibrot set for z^3 + c, which has two arms where the Mandelbrot set
+# has one, and looks the same turned half way round. It's taller than wide,
+# so it's laid on its side, the imaginary axis running across.
+sub multibrot_canvas {
+    my $canvas = escape_view(
+        center_x  => 0, center_y => 0,  half_height => 0.9,
+        glow_from => 5, glow_to  => 60, glow        => \@TRICORN_GLOW,
+        escape    => sub { escape_time(0, 0, $_[1], $_[0], 300, 0, 0, 3) },
+    );
+    put_text($canvas, 0, 1, 'a Multibrot set:', 97);
+    put_text($canvas, 1, 1, 'z -> z^3 + c',     94);
+    return $canvas;
+}
+
+# One step of the Gray-Scott reaction on a grid that wraps round at the
+# edges, $cols by $rows, stored row by row. Chemical u is fed in from
+# outside at rate $feed, v turns u into more v (u + 2v -> 3v), and v is taken
+# away at rate $feed + $kill. Both spread to the four neighbors, u twice as
+# fast as v. Returns the new u and v.
+sub gray_scott_step {
+    my ($u, $v, $cols, $rows, $feed, $kill, $dt) = @_;
+    my (@u, @v);
+    for my $r (0 .. $rows - 1) {
+        my ($here, $up, $down) = ($r * $cols, ($r - 1) % $rows * $cols, ($r + 1) % $rows * $cols);
+        for my $c (0 .. $cols - 1) {
+            my ($left, $right) = (($c - 1) % $cols, ($c + 1) % $cols);
+            my $i = $here + $c;
+            my ($a, $b) = ($u->[$i], $v->[$i]);
+            my $spread_u = $u->[ $here + $left ] + $u->[ $here + $right ] + $u->[ $up + $c ] + $u->[ $down + $c ] - 4 * $a;
+            my $spread_v = $v->[ $here + $left ] + $v->[ $here + $right ] + $v->[ $up + $c ] + $v->[ $down + $c ] - 4 * $b;
+            my $reaction = $a * $b * $b;
+            $u[$i] = $a + $dt * (0.1 * $spread_u - $reaction + $feed * (1 - $a));
+            $v[$i] = $b + $dt * (0.05 * $spread_v + $reaction - ($feed + $kill) * $b);
+        }
+    }
+    return (\@u, \@v);
+}
+
+# Turing patterns: start with all u and a dozen little squares of v dropped
+# at random, and let the reaction run. At this feed and kill rate v grows
+# into winding stripes like coral, the kind of pattern Turing suggested makes
+# a leopard's spots and a zebra's stripes. Each square on the grid is two
+# pixels wide and one tall, so it's square on screen. Colored by how much v
+# there is.
+my @TURING_SHADES = map { nearest_color(@$_) } [ 0, 30, 60 ], [ 0, 150, 160 ], [ 200, 255, 230 ];
+
+sub turing_canvas {
+    my ($cols, $rows, $seed) = (70, 48, 20261022);
+    my @u = (1) x ($cols * $rows);
+    my @v = (0) x ($cols * $rows);
+    for (1 .. 12) {
+        $seed = next_seed($seed);
+        my $col = $seed % $cols;
+        $seed = next_seed($seed);
+        my $row = $seed % $rows;
+        for my $r ($row - 2 .. $row + 2) {
+            for my $c ($col - 2 .. $col + 2) {
+                my $i = $r % $rows * $cols + $c % $cols;
+                ($u[$i], $v[$i]) = (0.5, 0.25);
+            }
+        }
+    }
+    my ($u, $v) = (\@u, \@v);
+    ($u, $v) = gray_scott_step($u, $v, $cols, $rows, 0.055, 0.062, 2) for 1 .. 1250;
+    my @pixels = map {
+        my $r = $_;
+        [ map { my $amount = $v->[ $r * $cols + POSIX::floor($_ / 2) ]; $TURING_SHADES[ $amount > 0.2 ? 2 : $amount > 0.1 ? 1 : 0 ] } 0 .. 139 ];
+    } 0 .. $rows - 1;
+    my $canvas = pixels_to_canvas(\@pixels);
+    put_text($canvas, 0, 1, 'Turing patterns', 97);
+    return $canvas;
+}
+
 our %PIECES = (
     mandelbrot => { draw => \&mandelbrot_canvas, about => 'the whole Mandelbrot set, glowing toward its edge' },
     seahorse   => { draw => \&seahorse_canvas,   about => 'a seahorse tail in Seahorse Valley, 600 times closer' },
@@ -4134,6 +4268,10 @@ our %PIECES = (
     brownian   => { draw => \&brownian_canvas,   about => 'a Brownian tree: grains wander in at random and stick where they first touch' },
     cassini    => { draw => \&cassini_canvas,    about => 'Cassini ovals: the curves where the distances to two points multiply to the same number' },
     klein      => { draw => \&klein_canvas,      about => 'the Klein bottle, a surface with only one side, passing through itself' },
+    arrowhead  => { draw => \&arrowhead_canvas,  about => 'Sierpinski\'s arrowhead curve: one line that traces Sierpinski\'s triangle' },
+    henon      => { draw => \&henon_canvas,      about => 'the Henon attractor: a map that stretches and folds, leaving layers within layers' },
+    multibrot  => { draw => \&multibrot_canvas,  about => 'a Multibrot set: the Mandelbrot set\'s rule with z cubed instead of squared' },
+    turing     => { draw => \&turing_canvas,     about => 'Turing patterns: two chemicals reacting and spreading into stripes like coral' },
     hopf       => { draw => \&hopf_canvas,       about => 'the Hopf fibration: circles on a doughnut, every one linked through every other' },
     burningship => { draw => \&burningship_canvas, about => 'the Burning Ship fractal, z^2 + c with the orbit folded' },
     dragon     => { draw => \&dragon_canvas,     about => 'the Heighway dragon, a strip of paper folded in half eight times' },

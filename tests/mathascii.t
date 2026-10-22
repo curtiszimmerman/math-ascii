@@ -316,6 +316,19 @@ subtest 'escape_time with the burning ship fold' => sub {
     ok defined escape_time(0, 0, 0, 1, 500, 1), 'and escapes with it';
 };
 
+subtest 'escape_time with a higher power' => sub {
+    # z^3 + i goes 0, i, -i + i = 0, i, ... round a cycle.
+    is_deeply [ escape_time(0, 0, 0, 1, 500, 0, 0, 3) ], [], 'z^3 + i cycles';
+    my ($x, $step) = (0, 0);
+    ($x, $step) = ($x**3 + 0.5, $step + 1) until $x**2 > 65536;
+    is sprintf('%.9f', escape_time(0, 0, 0.5, 0, 500, 0, 0, 3)), sprintf('%.9f', $step + 1 - log(log($x**2) / 2) / log(3)),
+        'c = 0.5 escapes when cubing just as it does by hand';
+    my @lopsided = grep { (escape_time(0, 0, @$_, 300, 0, 0, 3) // -1) != (escape_time(0, 0, -$_->[0], -$_->[1], 300, 0, 0, 3) // -1) }
+        [ 0.3, 0.6 ], [ -0.4, 0.9 ], [ 0.55, 0.1 ], [ 0.1, 1.1 ];
+    is_deeply \@lopsided, [], 'the z^3 + c set looks the same turned half way round';
+    is escape_time(0, 0, 0.3, 0.6, 300, 0, 0, 2), escape_time(0, 0, 0.3, 0.6, 300), 'power 2 is the Mandelbrot set';
+};
+
 subtest 'fern_points' => sub {
     my @points = fern_points(20_000);
     is scalar @points, 20_000, 'one point per step';
@@ -1299,6 +1312,71 @@ subtest 'klein_point' => sub {
     is_deeply rounded([ klein_point(0, 1) ]), rounded([ -0.4 * cos 1, 0, 0.4 * sin 1 ]), 'the mouth is a circle of radius 0.4';
 };
 
+subtest 'arrowhead_path' => sub {
+    my $pi = 4 * atan2(1, 1);
+    for my $order (1, 4, 5) {
+        my @path = arrowhead_path($order);
+        is scalar @path, 3**$order + 1, "order $order is 3^$order steps";
+        my @odd = grep {
+            my ($dx, $dy) = ($path[$_][0] - $path[ $_ - 1 ][0], $path[$_][1] - $path[ $_ - 1 ][1]);
+            my $sixths = atan2($dy, $dx) / ($pi / 3);
+            abs(sqrt($dx**2 + $dy**2) - 1) > 1e-9 || abs($sixths - POSIX::floor($sixths + 0.5)) > 1e-9;
+        } 1 .. $#path;
+        is_deeply \@odd, [], 'every step is one long and heads along a multiple of 60 degrees';
+        is sprintf('%.9f', sqrt($path[-1][0]**2 + $path[-1][1]**2)), sprintf('%.9f', 2**$order), 'it ends 2^order away from where it began';
+        my %seen;
+        is_deeply [ grep { $seen{"@{ rounded($_) }"}++ } @path ], [], 'and never comes back to a corner';
+    }
+    # Whether (x, y) is in Sierpinski's triangle with corners (0, 0), (side,
+    # 0) and the one above, cut down until the triangles left are side 1.
+    # Edges count as in.
+    my $in_sierpinski;
+    $in_sierpinski = sub {
+        my ($x, $y, $side) = @_;
+        my $h = sqrt(3) / 2;
+        return 0 if $y < -1e-9 || $y > $x * 2 * $h + 1e-9 || $y > ($side - $x) * 2 * $h + 1e-9;
+        return 1 if $side <= 1;
+        my $half = $side / 2;
+        return $in_sierpinski->($x, $y, $half) || $in_sierpinski->($x - $half, $y, $half) || $in_sierpinski->($x - $half / 2, $y - $half * $h, $half);
+    };
+    for my $order (2, 4) {
+        is_deeply [ grep { !$in_sierpinski->(@$_, 2**$order) } arrowhead_path($order) ], [],
+            "order $order stays inside Sierpinski's triangle, out of every hole";
+    }
+    ok !$in_sierpinski->(8, 2, 16), 'which has a hole in the middle';
+    ok $in_sierpinski->(8, 0, 16) && $in_sierpinski->(1.5, 0.2, 16), 'but not everywhere';
+};
+
+subtest 'henon_points' => sub {
+    my @points = henon_points(2000);
+    is scalar @points, 2000, 'as many points as asked for';
+    my @unruly = grep { abs($points[$_][0] - (1 - 1.4 * $points[ $_ - 1 ][0]**2 + $points[ $_ - 1 ][1])) > 1e-9 || abs($points[$_][1] - 0.3 * $points[ $_ - 1 ][0]) > 1e-9 } 1 .. $#points;
+    is_deeply \@unruly, [], 'each point is (1 - 1.4x^2 + y, 0.3x) of the one before';
+    is_deeply [ grep { abs($_->[0]) > 1.3 || abs($_->[1]) > 0.4 } @points ], [], 'all on the attractor, inside its box';
+};
+
+subtest 'gray_scott_step' => sub {
+    my ($cols, $rows) = (6, 5);
+    my @u = (1) x ($cols * $rows);
+    my @v = (0) x ($cols * $rows);
+    my ($u, $v) = gray_scott_step(\@u, \@v, $cols, $rows, 0.055, 0.062, 1);
+    is_deeply [ $u, $v ], [ \@u, \@v ], 'all chemical u and none of v stays that way';
+
+    my @spike = (0) x ($cols * $rows);
+    $spike[7] = 1;
+    ($u) = gray_scott_step(\@spike, [ (0) x ($cols * $rows) ], $cols, $rows, 0, 0, 1);
+    is sprintf('%.9f', List::Util::sum(@$u)), '1.000000000', 'with no feed or kill, spreading out keeps the total';
+    ok $u->[7] < 1 && $u->[8] > 0 && $u->[6] > 0 && $u->[1] > 0 && $u->[13] > 0, 'spreading to its neighbors';
+    ($u) = gray_scott_step([ (0) x 5, 1, (0) x 24 ], [ (0) x 30 ], $cols, $rows, 0, 0, 1);
+    ok $u->[0] > 0 && $u->[11] > 0 && $u->[2] == 0, 'and across the edge, which wraps round';
+
+    @u = (0.5) x ($cols * $rows);
+    @v = (0.25) x ($cols * $rows);
+    ($u, $v) = gray_scott_step(\@u, \@v, $cols, $rows, 0.04, 0.06, 1);
+    is sprintf('%.9f', $u->[0]), sprintf('%.9f', 0.5 - 0.5 * 0.25**2 + 0.04 * 0.5), 'evenly mixed, u loses u v^2 and gains the feed';
+    is sprintf('%.9f', $v->[0]), sprintf('%.9f', 0.25 + 0.5 * 0.25**2 - 0.1 * 0.25), 'and v gains u v^2 and loses feed plus kill';
+};
+
 subtest 'pi_digits' => sub {
     my @digits = pi_digits(800);
     is scalar @digits, 800, 'as many digits as asked for';
@@ -1573,7 +1651,7 @@ subtest 'cmd_math with no piece lists the pieces' => sub {
     my $server = FakeServer->new;
     my $item   = FakeItem->new;
     cmd_math('', $server, $item);
-    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian billiard brownian buddhabrot burningship butterfly cantor cassini caustic chladni clifford clothoid collatz conformal cycloid dipole dragon drum elephant euler fern fibword ford fourier gaussian golden gosper harmonograph hilbert hopf hyperbolic julia kepler klein knot koch langton levy life logistic lorenz lyapunov mandelbrot maurer minibrot mobius newton orbital pascal pendulum penrose phase phoenix piwalk plant pursuit pythagoras quasicrystal recaman ripples rossler rule30 sandpile seahorse spirograph steiner sunflower terdragon tesseract theodorus threebody timestable tongues tricorn truchet ulam voronoi weierstrass zeta', 'CLIENTCRAP' ] ];
+    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian arrowhead billiard brownian buddhabrot burningship butterfly cantor cassini caustic chladni clifford clothoid collatz conformal cycloid dipole dragon drum elephant euler fern fibword ford fourier gaussian golden gosper harmonograph henon hilbert hopf hyperbolic julia kepler klein knot koch langton levy life logistic lorenz lyapunov mandelbrot maurer minibrot mobius multibrot newton orbital pascal pendulum penrose phase phoenix piwalk plant pursuit pythagoras quasicrystal recaman ripples rossler rule30 sandpile seahorse spirograph steiner sunflower terdragon tesseract theodorus threebody timestable tongues tricorn truchet turing ulam voronoi weierstrass zeta', 'CLIENTCRAP' ] ];
     is_deeply $server->{sent}, [], 'nothing was sent';
 };
 
@@ -1599,6 +1677,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
     is_deeply $item->{printed}, [
         map { [ "math: $_", 'CLIENTCRAP' ] }
             'apollonian    the Apollonian gasket, every gap between circles filled with another circle',
+            'arrowhead     Sierpinski\'s arrowhead curve: one line that traces Sierpinski\'s triangle',
             'billiard      a billiard ball in an ellipse, its path never crossing a smaller ellipse inside',
             'brownian      a Brownian tree: grains wander in at random and stick where they first touch',
             'buddhabrot    the Buddhabrot: the paths of every point that escapes the Mandelbrot set',
@@ -1626,6 +1705,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'golden        the golden spiral, drawn through squares whose sides are the Fibonacci numbers',
             'gosper        the flowsnake: Gosper\'s curve, seven copies of itself on a hexagonal grid',
             'harmonograph  two damped pendulums drawing on paper, spiraling in as they tire',
+            'henon         the Henon attractor: a map that stretches and folds, leaving layers within layers',
             'hilbert       the Hilbert curve, one line through all 256 squares of a grid',
             'hopf          the Hopf fibration: circles on a doughnut, every one linked through every other',
             'hyperbolic    the hyperbolic plane in a disk, tiled by same-size pentagons, four to a corner',
@@ -1644,6 +1724,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'maurer        a Maurer rose: a walk round a rose in steps of 71 degrees',
             'minibrot      a tiny copy of the Mandelbrot set, out on its needle',
             'mobius        a Mobius strip: a band with a half twist, so it has one side and one edge',
+            'multibrot     a Multibrot set: the Mandelbrot set\'s rule with z cubed instead of squared',
             'newton        Newton\'s method on z^3 - 1, three basins with a fractal border',
             'orbital       a slice through a hydrogen atom\'s 4d orbital',
             'pascal        Pascal\'s triangle mod 2, which turns out to be Sierpinski\'s',
@@ -1673,6 +1754,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'tongues       Arnold tongues: where a kicked circle locks onto a fraction of a turn',
             'tricorn       the Tricorn, the Mandelbrot set\'s rule with z flipped to its conjugate',
             'truchet       Truchet tiles: quarter circles laid at random, joining into endless paths',
+            'turing        Turing patterns: two chemicals reacting and spreading into stripes like coral',
             'ulam          the Ulam spiral, where the primes line up on diagonals',
             'voronoi       a sunflower\'s seeds, each given the patch of head nearest it',
             'weierstrass   the Weierstrass function: continuous everywhere, smooth nowhere',
@@ -1802,7 +1884,7 @@ my @usage = (
 subtest 'cmd_math refuses bad input' => sub {
     my $item = FakeItem->new;
     cmd_math('nope', FakeServer->new, $item);
-    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian billiard brownian buddhabrot burningship butterfly cantor cassini caustic chladni clifford clothoid collatz conformal cycloid dipole dragon drum elephant euler fern fibword ford fourier gaussian golden gosper harmonograph hilbert hopf hyperbolic julia kepler klein knot koch langton levy life logistic lorenz lyapunov mandelbrot maurer minibrot mobius newton orbital pascal pendulum penrose phase phoenix piwalk plant pursuit pythagoras quasicrystal recaman ripples rossler rule30 sandpile seahorse spirograph steiner sunflower terdragon tesseract theodorus threebody timestable tongues tricorn truchet ulam voronoi weierstrass zeta', 'CLIENTERROR' ] ],
+    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian arrowhead billiard brownian buddhabrot burningship butterfly cantor cassini caustic chladni clifford clothoid collatz conformal cycloid dipole dragon drum elephant euler fern fibword ford fourier gaussian golden gosper harmonograph henon hilbert hopf hyperbolic julia kepler klein knot koch langton levy life logistic lorenz lyapunov mandelbrot maurer minibrot mobius multibrot newton orbital pascal pendulum penrose phase phoenix piwalk plant pursuit pythagoras quasicrystal recaman ripples rossler rule30 sandpile seahorse spirograph steiner sunflower terdragon tesseract theodorus threebody timestable tongues tricorn truchet turing ulam voronoi weierstrass zeta', 'CLIENTERROR' ] ],
         'unknown piece';
 
     @printed = ();
