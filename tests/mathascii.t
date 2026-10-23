@@ -1425,6 +1425,105 @@ subtest 'ikeda_points' => sub {
     is_deeply \@unruly, [], 'each point is the one before turned by 0.4 - 6 / (1 + |z|^2), shrunk by 0.9 and moved 1 right';
 };
 
+subtest 'carpet_hole' => sub {
+    is carpet_hole(0.5,  0.5,  4), 1, 'the middle ninth is the first hole';
+    is carpet_hole(1 / 6, 1 / 6, 4), 2, 'the middle of the bottom left ninth is a second hole';
+    is carpet_hole(0.05, 0.05, 4), 3, '0.05 is 0.0011... in base 3, so a third hole';
+    is carpet_hole(0.05, 0.05, 2), 0, 'which is still carpet if we only cut twice';
+    is carpet_hole(0.5,  0.01, 4), 0, '0.5 is 0.111... but 0.01 is 0.00002..., so they never both have a 1';
+
+    # Cell centers of a 243 square grid fall in a hole at the same level as
+    # their whole cell, and each cut keeps 8 of every 9 squares.
+    my $kept = grep { !carpet_hole(($_ % 243 + 0.5) / 243, (int($_ / 243) + 0.5) / 243, 3) } 0 .. 243**2 - 1;
+    is $kept, 243**2 * 8**3 / 9**3, 'three cuts keep (8/9)^3 of the square';
+
+    my @unsymmetric = grep {
+        my ($x, $y) = @$_;
+        my $level = carpet_hole($x, $y, 5);
+        grep { carpet_hole(@$_, 5) != $level } [ $y, $x ], [ 1 - $x, $y ], [ $x, 1 - $y ];
+    } [ 0.13, 0.71 ], [ 0.402, 0.05 ], [ 0.93, 0.62 ];
+    is_deeply \@unsymmetric, [], 'it has the symmetry of a square';
+};
+
+subtest 'lotka_velocity' => sub {
+    is_deeply rounded([ lotka_velocity(4, 2.75) ]), [ 0, 0 ], 'prey and predators balance at (0.4/0.1, 1.1/0.4)';
+    is_deeply rounded([ lotka_velocity(2, 1) ]), [ 1.4, -0.2 ], 'worked by hand at (2, 1)';
+    is_deeply rounded([ lotka_velocity(3, 0) ]), [ 3.3, 0 ], 'with no predators the prey just grow';
+
+    my @orbit  = lotka_orbit(8, 2.75, 20, 1000);
+    my @values = map { lotka_invariant(@$_) } @orbit;
+    is scalar @orbit, 1001, 'an orbit has its start and a point per step';
+    ok List::Util::max(@values) - List::Util::min(@values) < 1e-6, '0.1x - 0.4 ln x + 0.4y - 1.1 ln y stays the same along it';
+    ok List::Util::min(map { $_->[0] } @orbit) < 2, 'and the prey crash';
+    ok List::Util::max(map { $_->[1] } @orbit) > 4, 'while the predators boom';
+};
+
+subtest 'magnet_step' => sub {
+    is_deeply rounded([ magnet_step(0, 0, 0, 0) ]), [ 0.25, 0 ], '((0 - 1) / (0 - 2))^2 at c = 0';
+    is_deeply rounded([ magnet_step(0, 0, 0, 1) ]), [ 0.32, -0.24 ], '((i - 1) / (i - 2))^2 = (8 - 6i) / 25';
+    my @moved = grep { "@{ rounded([ magnet_step(1, 0, @$_) ]) }" ne '1 0' } [ 0.3, 0.7 ], [ -2, 1.5 ], [ 3, 0 ];
+    is_deeply \@moved, [], 'z = 1 stays put for every c';
+};
+
+subtest 'magnet_escape' => sub {
+    is_deeply [ magnet_escape(1.5, 0, 100) ], [ 'settled', 1 ], 'at c = 1.5 the first step lands on 1';
+    is_deeply [ magnet_escape(1, 0, 50) ], [], 'at c = 1 it sits at 0 forever';
+    for my $c ([ -1, 1.2 ], [ 3, 0.5 ], [ 0.6, 2.1 ], [ 5, 4 ]) {
+        my ($fate, $steps) = magnet_escape(@$c, 200);
+        next if !defined $fate;
+        my ($x, $y) = (0, 0);
+        ($x, $y) = magnet_step($x, $y, @$c) for 1 .. $steps;
+        my $size = $fate eq 'settled' ? ($x - 1)**2 + $y**2 : $x**2 + $y**2;
+        ok $fate eq 'settled' ? $size < 1e-6 : $size > 1e4, "c = @$c: $fate after $steps steps, and it did";
+    }
+};
+
+subtest 'ising_energy' => sub {
+    is ising_energy([ [ 1, 1 ], [ 1, 1 ] ]), -8, 'a 2 by 2 wrapped grid has each pair joined twice, all agreeing';
+    is ising_energy([ [ 1, -1, 1, -1 ], [ -1, 1, -1, 1 ] ]), 16, 'a checkerboard disagrees everywhere';
+    is ising_energy([ [ 1, 1, -1 ], [ 1, -1, -1 ] ]), 0, 'worked by hand: two up pairs across, four down, both ways round';
+
+    my $seed  = 9;
+    my $spins = [ map { [ map { $seed = next_seed($seed); $seed % 2 ? 1 : -1 } 1 .. 7 ] } 1 .. 5 ];
+    my @wrong = grep {
+        my ($r, $c) = (int($_ / 7), $_ % 7);
+        my $before = ising_energy($spins);
+        $spins->[$r][$c] *= -1;
+        my $after = ising_energy($spins);
+        $spins->[$r][$c] *= -1;
+        ising_flip_cost($spins, $r, $c) != $after - $before;
+    } 0 .. 34;
+    is_deeply \@wrong, [], 'the cost of flipping a spin is the change in energy, wrapping round the edges';
+};
+
+subtest 'ising_sweep' => sub {
+    my $seed  = 4;
+    my $spins = [ map { [ map { $seed = next_seed($seed); $seed % 2 ? 1 : -1 } 1 .. 20 ] } 1 .. 10 ];
+    my @energies = (ising_energy($spins));
+    for (1 .. 5) {
+        $seed = ising_sweep($spins, 0.01, $seed);
+        push @energies, ising_energy($spins);
+    }
+    is_deeply [ grep { $energies[$_] > $energies[ $_ - 1 ] } 1 .. 5 ], [], 'nearly frozen, the energy never goes up';
+    ok $energies[-1] < $energies[0], 'and it comes down';
+
+    my $up = [ map { [ (1) x 20 ] } 1 .. 10 ];
+    ising_sweep($up, 0.01, 1);
+    is_deeply $up, [ map { [ (1) x 20 ] } 1 .. 10 ], 'all spins up stays up';
+
+    my $magnetization = sub {
+        my ($temperature) = @_;
+        my ($spins, $seed, $total) = ([ map { [ (1) x 20 ] } 1 .. 10 ], 1, 0);
+        for my $sweep (1 .. 20) {
+            $seed = ising_sweep($spins, $temperature, $seed);
+            $total += abs(List::Util::sum(map { @$_ } @$spins) / 200) if $sweep > 10;
+        }
+        return $total / 10;
+    };
+    ok $magnetization->(1) > 0.9, 'cold, all up mostly stays up';
+    ok $magnetization->(5) < 0.3, 'hot, it melts into a mix of up and down';
+};
+
 subtest 'pi_digits' => sub {
     my @digits = pi_digits(800);
     is scalar @digits, 800, 'as many digits as asked for';

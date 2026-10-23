@@ -4363,6 +4363,186 @@ sub ikeda_canvas {
     return $canvas;
 }
 
+# Sierpinski's carpet: cut the unit square into nine and throw away the
+# middle one, then do the same to each of the eight left, and so on. Returns
+# which cut threw away the point (x, y), or 0 if it survives $cuts of them.
+# Reading x and y in base 3, a point is thrown away at the first place where
+# both have the digit 1.
+sub carpet_hole {
+    my ($x, $y, $cuts) = @_;
+    for my $cut (1 .. $cuts) {
+        ($x, $y) = (3 * $x, 3 * $y);
+        my ($digit_x, $digit_y) = (POSIX::floor($x), POSIX::floor($y));
+        return $cut if $digit_x == 1 && $digit_y == 1;
+        ($x, $y) = ($x - $digit_x, $y - $digit_y);
+    }
+    return 0;
+}
+
+# The carpet cut five times, 48 rows tall and 96 pixels across so it's
+# square. The carpet is pale, and each hole is colored by which cut made it,
+# from deep blue for the first to pink.
+my @CARPET_COLORS = map { nearest_color(@$_) } [ 255, 230, 170 ], [ 10, 20, 90 ], [ 40, 70, 200 ], [ 120, 60, 220 ], [ 200, 80, 220 ], [ 255, 120, 220 ];
+
+sub carpet_canvas {
+    my @pixels = map {
+        my $r = $_;
+        [ map { $_ < 22 || $_ >= 118 ? $BLACK : $CARPET_COLORS[ carpet_hole(($_ - 22 + 0.5) / 96, ($r + 0.5) / 48, 5) ] } 0 .. 139 ];
+    } 0 .. 47;
+    return pixels_to_canvas(\@pixels);
+}
+
+# Lotka and Volterra's predators and prey: prey x breed at rate 1.1 and get
+# eaten at 0.4 per predator, predators y die off at 0.4 and grow 0.1 for
+# each prey they meet. Neither settles: the numbers go round and round the
+# balance point (4, 2.75) forever, keeping 0.1x - 0.4 ln x + 0.4y - 1.1 ln y
+# the same the whole way.
+sub lotka_velocity {
+    my ($x, $y) = @_;
+    return ($x * (1.1 - 0.4 * $y), $y * (0.1 * $x - 0.4));
+}
+
+sub lotka_invariant {
+    my ($x, $y) = @_;
+    return 0.1 * $x - 0.4 * log($x) + 0.4 * $y - 1.1 * log($y);
+}
+
+# The populations from (x, y) for $time, in $steps steps, as [x, y].
+sub lotka_orbit {
+    my ($x, $y, $time, $steps) = @_;
+    my @orbit = ([ $x, $y ]);
+    push @orbit, [ rk4_step(\&lotka_velocity, $orbit[-1], $time / $steps) ] for 1 .. $steps;
+    return @orbit;
+}
+
+# Bigger cycles swing further from the balance, so the prey crash nearly to
+# nothing before the predators starve. Each cycle gets its own hue, and the
+# balance point is marked in white.
+sub lotka_canvas {
+    my @starts = (4.8, 6, 8, 11, 15);
+    my @orbits = map { [ lotka_orbit($_, 2.75, 40, 4000) ] } @starts;
+    my $pixel  = fit_to_frame([ map { @$_ } @orbits ]);
+    my @points;
+    for my $k (0 .. $#orbits) {
+        my @orbit = @{ $orbits[$k] };
+        push @points, map { line_points($pixel->(@{ $orbit[ $_ - 1 ] }), $pixel->(@{ $orbit[$_] }), $k / $#orbits) } 1 .. $#orbit;
+    }
+    my @rgb = map { [ map { [ 0, 0, 0 ] } 1 .. 140 ] } 1 .. 48;
+    draw_glow_curve(\@rgb, \@points, \@ZETA_HUES, 0.5);
+    paint_points(\@rgb, [ $pixel->(4, 2.75) ], [ 255, 255, 255 ]);
+    my @palette = (gradient_palette(\@ZETA_HUES), $BLACK, 98);
+    my $canvas  = pixels_to_canvas([ map { [ map { nearest_color_in(\@palette, @$_) } @$_ ] } @rgb ]);
+    put_text($canvas, 0, 1, "prey      x' = x(1.1 - 0.4y)", 97);
+    put_text($canvas, 1, 1, "predators y' = y(0.1x - 0.4)", 94);
+    return $canvas;
+}
+
+# One step of the magnet fractal, from a model of magnetism on a lattice:
+# z -> ((z^2 + c - 1) / (2z + c - 2))^2. Returns the new (x, y), or nothing
+# when the bottom is zero.
+sub magnet_step {
+    my ($x, $y, $cx, $cy) = @_;
+    my ($top_x, $top_y)       = ($x * $x - $y * $y + $cx - 1, 2 * $x * $y + $cy);
+    my ($bottom_x, $bottom_y) = (2 * $x + $cx - 2, 2 * $y + $cy);
+    my $size = $bottom_x**2 + $bottom_y**2;
+    return if $size == 0;
+    my ($w_x, $w_y) = (($top_x * $bottom_x + $top_y * $bottom_y) / $size, ($top_y * $bottom_x - $top_x * $bottom_y) / $size);
+    return ($w_x * $w_x - $w_y * $w_y, 2 * $w_x * $w_y);
+}
+
+# Follows the magnet map from z = 0. Every c has z = 1 as a fixed point, so
+# besides escaping, z can settle onto 1. Returns ('escaped', steps) or
+# ('settled', steps), or nothing if it does neither within $max_steps.
+sub magnet_escape {
+    my ($cx, $cy, $max_steps) = @_;
+    my ($x, $y) = (0, 0);
+    for my $step (1 .. $max_steps) {
+        ($x, $y) = magnet_step($x, $y, $cx, $cy);
+        return ('escaped', $step) if !defined $x || $x * $x + $y * $y > 1e4;
+        return ('settled', $step) if ($x - 1)**2 + $y**2 < 1e-8;
+    }
+    return;
+}
+
+# Escaping points glow blue and settling ones gold, both brighter the
+# faster they go, with black for the points that do neither.
+my @MAGNET_ESCAPED = ([ 0, 120, 200, 255 ], [ 0.4, 30, 60, 200 ], [ 1, 0, 0, 40 ]);
+my @MAGNET_SETTLED = ([ 0, 255, 230, 140 ], [ 0.4, 255, 130, 0 ], [ 1, 80, 0, 0 ]);
+
+sub magnet_canvas {
+    my $canvas = sampled_view(
+        center_x => 1.5, center_y => 0, half_height => 2.2,
+        palette  => [ map { gradient_palette($_) } \@MAGNET_ESCAPED, \@MAGNET_SETTLED ],
+        color    => sub {
+            my ($fate, $steps) = magnet_escape($_[0], $_[1], 100);
+            return if !defined $fate;
+            return [ gradient_rgb($fate eq 'escaped' ? \@MAGNET_ESCAPED : \@MAGNET_SETTLED, log($steps) / log(100)) ];
+        },
+    );
+    put_text($canvas, 0, 1, 'z -> ((z^2 + c - 1) / (2z + c - 2))^2', 97);
+    return $canvas;
+}
+
+# The Ising model of a magnet: a grid of spins, each up (1) or down (-1),
+# wrapping round at the edges. Every pair of neighbors that disagrees costs
+# energy. Each spin is counted with its right and lower neighbors, so a grid
+# only 2 tall joins each pair twice, once each way round.
+sub ising_energy {
+    my ($spins) = @_;
+    my ($rows, $cols) = (scalar @$spins, scalar @{ $spins->[0] });
+    my $energy = 0;
+    for my $r (0 .. $rows - 1) {
+        for my $c (0 .. $cols - 1) {
+            $energy -= $spins->[$r][$c] * ($spins->[$r][ ($c + 1) % $cols ] + $spins->[ ($r + 1) % $rows ][$c]);
+        }
+    }
+    return $energy;
+}
+
+# How much the energy goes up if the spin at (r, c) flips.
+sub ising_flip_cost {
+    my ($spins, $r, $c) = @_;
+    my ($rows, $cols) = (scalar @$spins, scalar @{ $spins->[0] });
+    my $neighbors = $spins->[ ($r - 1) % $rows ][$c] + $spins->[ ($r + 1) % $rows ][$c]
+        + $spins->[$r][ ($c - 1) % $cols ] + $spins->[$r][ ($c + 1) % $cols ];
+    return 2 * $spins->[$r][$c] * $neighbors;
+}
+
+# One Metropolis sweep at $temperature: each spin in turn flips if that
+# lowers the energy or keeps it the same, and otherwise flips with chance
+# e^(-cost / temperature). Returns the random seed to carry on with.
+sub ising_sweep {
+    my ($spins, $temperature, $seed) = @_;
+    for my $r (0 .. $#$spins) {
+        for my $c (0 .. $#{ $spins->[$r] }) {
+            my $cost = ising_flip_cost($spins, $r, $c);
+            if ($cost > 0) {
+                $seed = next_seed($seed);
+                next if $seed / 2147483648 >= exp(-$cost / $temperature);
+            }
+            $spins->[$r][$c] *= -1;
+        }
+    }
+    return $seed;
+}
+
+# Started at random and cooled straight to the critical temperature,
+# 2 / ln(1 + sqrt 2), where the magnet is just about to pick a direction.
+# Patches of every size form, with patches inside them. Each spin is two
+# pixels wide so it's square.
+my @ISING_COLORS = map { nearest_color(@$_) } [ 255, 140, 0 ], [ 20, 30, 120 ];
+
+sub ising_canvas {
+    my $temperature = 2 / log(1 + sqrt 2);
+    my $seed  = 20261024;
+    my $spins = [ map { [ map { $seed = next_seed($seed); $seed % 2 ? 1 : -1 } 1 .. 70 ] } 1 .. 48 ];
+    $seed = ising_sweep($spins, $temperature, $seed) for 1 .. 300;
+    my @pixels = map { my $row = $_; [ map { $ISING_COLORS[ $row->[ POSIX::floor($_ / 2) ] < 0 ] } 0 .. 139 ] } @$spins;
+    my $canvas = pixels_to_canvas(\@pixels);
+    put_text($canvas, 0, 1, 'the Ising model at T = 2.269', 97);
+    return $canvas;
+}
+
 our %PIECES = (
     mandelbrot => { draw => \&mandelbrot_canvas, about => 'the whole Mandelbrot set, glowing toward its edge' },
     seahorse   => { draw => \&seahorse_canvas,   about => 'a seahorse tail in Seahorse Valley, 600 times closer' },
