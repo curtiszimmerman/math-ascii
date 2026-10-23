@@ -4221,6 +4221,148 @@ sub turing_canvas {
     return $canvas;
 }
 
+# Thomas's cyclically symmetric attractor: dx/dt = sin y - bx, and the same
+# for y and z with the letters moved along one. Swap x for y, y for z and z
+# for x and nothing changes, so it has three-fold symmetry round the line
+# x = y = z. At b = 0.208186 it's chaotic.
+my $THOMAS_B = 0.208186;
+
+sub thomas_velocity {
+    my ($x, $y, $z) = @_;
+    return (sin($y) - $THOMAS_B * $x, sin($z) - $THOMAS_B * $y, sin($x) - $THOMAS_B * $z);
+}
+
+# $count points along the attractor, as [x, y, z], with the start dropped
+# the same way as lorenz_points.
+sub thomas_points {
+    my ($count) = @_;
+    my @p = (1, 0, 0);
+    my @points;
+    for my $step (1 .. 1000 + $count) {
+        @p = rk4_step(\&thomas_velocity, \@p, 0.1);
+        push @points, [@p] if $step > 1000;
+    }
+    return @points;
+}
+
+# Seen looking straight down the line x = y = z, so its three-fold symmetry
+# shows, colored by how near the viewer each part is, nearer lines crossing
+# in front.
+sub thomas_canvas {
+    my @path  = map {
+        my ($x, $y, $z) = @$_;
+        [ ($x - $y) / sqrt(2), ($x + $y - 2 * $z) / sqrt(6), ($x + $y + $z) / sqrt(3) ];
+    } thomas_points(2500);
+    my @depths = map { $_->[2] } @path;
+    my ($near, $far) = (List::Util::max(@depths), List::Util::min(@depths));
+    my $pixel  = fit_to_frame(\@path);
+    my @points = map { [ @{ $pixel->(@$_[ 0, 1 ]) }, ($_->[2] - $far) / ($near - $far), $_->[2] ] } @path;
+    my $canvas = glow_lines_canvas(\@points, \@LORENZ_HUES, 0.5);
+    put_text($canvas, 0, 1, 'Thomas\'s attractor:', 97);
+    put_text($canvas, 1, 1, 'dx/dt = sin y - bx',   94);
+    put_text($canvas, 2, 1, 'dy/dt = sin z - by',   94);
+    put_text($canvas, 3, 1, 'dz/dt = sin x - bz',   94);
+    return $canvas;
+}
+
+# Finds the clusters on a grid of open (1) and closed (0) squares, where open
+# squares touching side to side are in the same cluster. Returns a grid of
+# the same shape with each open square's cluster number, 1 for the biggest,
+# 2 for the next, and so on, ties going to the one found first reading from
+# the top left, and 0 for closed squares.
+sub percolation_clusters {
+    my ($open) = @_;
+    my ($rows, $cols) = (scalar @$open, scalar @{ $open->[0] });
+    my @found = map { [ (0) x $cols ] } 1 .. $rows;
+    my @clusters;
+    for my $r (0 .. $rows - 1) {
+        for my $c (0 .. $cols - 1) {
+            next if !$open->[$r][$c] || $found[$r][$c];
+            my @cluster = ([ $r, $c ]);
+            $found[$r][$c] = 1;
+            for (my $k = 0; $k < @cluster; $k++) {
+                my ($cr, $cc) = @{ $cluster[$k] };
+                for my $next ([ $cr - 1, $cc ], [ $cr + 1, $cc ], [ $cr, $cc - 1 ], [ $cr, $cc + 1 ]) {
+                    my ($nr, $nc) = @$next;
+                    next if $nr < 0 || $nr >= $rows || $nc < 0 || $nc >= $cols || !$open->[$nr][$nc] || $found[$nr][$nc];
+                    $found[$nr][$nc] = 1;
+                    push @cluster, $next;
+                }
+            }
+            push @clusters, \@cluster;
+        }
+    }
+    my @ranked = map { $clusters[$_] } sort { @{ $clusters[$b] } <=> @{ $clusters[$a] } || $a <=> $b } 0 .. $#clusters;
+    my @labels = map { [ (0) x $cols ] } 1 .. $rows;
+    for my $k (0 .. $#ranked) {
+        $labels[ $_->[0] ][ $_->[1] ] = $k + 1 for @{ $ranked[$k] };
+    }
+    return \@labels;
+}
+
+# Squares opened at random, each with chance 0.62, a little over the 0.5927
+# at which a cluster first reaches from one side of a big grid to the other.
+# The biggest cluster is gold, the next few teal, and the crumbs gray. The
+# grid's squares are two pixels wide and one tall, so they're square on
+# screen. The caption gets a black box so it can be read.
+my @PERCOLATION_COLORS = map { nearest_color(@$_) } [ 0, 0, 0 ], [ 255, 200, 0 ], [ 0, 150, 160 ], [ 70, 70, 90 ];
+
+sub percolation_canvas {
+    my $seed   = 20261023;
+    my $open   = [ map { [ map { $seed = next_seed($seed); $seed < 0.62 * 2147483648 ? 1 : 0 } 1 .. 70 ] } 1 .. 48 ];
+    my $labels = percolation_clusters($open);
+    my @pixels = map {
+        my $row = $_;
+        [ map { my $label = $row->[ POSIX::floor($_ / 2) ]; $PERCOLATION_COLORS[ !$label ? 0 : $label == 1 ? 1 : $label <= 6 ? 2 : 3 ] } 0 .. 139 ];
+    } @$labels;
+    @{ $pixels[$_] }[ 0 .. 49 ] = ($BLACK) x 50 for 0 .. 1;
+    my $canvas = pixels_to_canvas(\@pixels);
+    put_text($canvas, 0, 1, 'percolation at p = 0.62', 97);
+    return $canvas;
+}
+
+# A spiral in the Mandelbrot set, where the boundary winds round and round
+# into a point, about 2000 times closer than the whole set.
+sub spiral_canvas {
+    my $canvas = mandelbrot_view(
+        center_x  => -0.77568377, center_y  => 0.13646737, half_height => 0.0006,
+        max_steps => 3000,        glow_from => 25,         glow_to     => 250,
+    );
+    put_text($canvas, 0, 1, 'a Mandelbrot spiral', 97);
+    put_text($canvas, 1, 1, '-0.77568+0.13647i',   94);
+    return $canvas;
+}
+
+# The Ikeda map, a model of light going round and round a ring cavity with
+# a nonlinear medium in it: each trip turns z by an angle that depends on how
+# bright it is, 0.4 - 6 / (1 + |z|^2), shrinks it by 0.9, and adds 1.
+# Returns $count points [x, y] on its attractor, after letting the first
+# hundred settle.
+sub ikeda_points {
+    my ($count) = @_;
+    my ($x, $y) = (0, 0);
+    my @points;
+    for my $step (1 .. 100 + $count) {
+        my $t = 0.4 - 6 / (1 + $x**2 + $y**2);
+        ($x, $y) = (1 + 0.9 * ($x * cos($t) - $y * sin($t)), 0.9 * ($x * sin($t) + $y * cos($t)));
+        push @points, [ $x, $y ] if $step > 100;
+    }
+    return @points;
+}
+
+sub ikeda_canvas {
+    my @points = ikeda_points(100_000);
+    my $pixel  = fit_to_frame(\@points);
+    my %hits;
+    for my $point (@points) {
+        my ($row, $col) = @{ $pixel->(@$point) };
+        $hits{ POSIX::floor($row + 0.5) . ',' . POSIX::floor($col + 0.5) }++;
+    }
+    my $canvas = density_canvas(\%hits, \@PHOENIX_GLOW, 0.95, 1);
+    put_text($canvas, 0, 1, 'the Ikeda attractor', 97);
+    return $canvas;
+}
+
 our %PIECES = (
     mandelbrot => { draw => \&mandelbrot_canvas, about => 'the whole Mandelbrot set, glowing toward its edge' },
     seahorse   => { draw => \&seahorse_canvas,   about => 'a seahorse tail in Seahorse Valley, 600 times closer' },
@@ -4272,6 +4414,10 @@ our %PIECES = (
     henon      => { draw => \&henon_canvas,      about => 'the Henon attractor: a map that stretches and folds, leaving layers within layers' },
     multibrot  => { draw => \&multibrot_canvas,  about => 'a Multibrot set: the Mandelbrot set\'s rule with z cubed instead of squared' },
     turing     => { draw => \&turing_canvas,     about => 'Turing patterns: two chemicals reacting and spreading into stripes like coral' },
+    thomas     => { draw => \&thomas_canvas,     about => 'Thomas\'s attractor: chaos with three-fold symmetry, seen down its axis' },
+    percolation => { draw => \&percolation_canvas, about => 'percolation: squares opened at random, just enough for one cluster to span the grid' },
+    spiral     => { draw => \&spiral_canvas,     about => 'a spiral in the Mandelbrot set, 2000 times closer than the whole set' },
+    ikeda      => { draw => \&ikeda_canvas,      about => 'the Ikeda attractor: light circling a ring cavity, spiraling into chaos' },
     hopf       => { draw => \&hopf_canvas,       about => 'the Hopf fibration: circles on a doughnut, every one linked through every other' },
     burningship => { draw => \&burningship_canvas, about => 'the Burning Ship fractal, z^2 + c with the orbit folded' },
     dragon     => { draw => \&dragon_canvas,     about => 'the Heighway dragon, a strip of paper folded in half eight times' },

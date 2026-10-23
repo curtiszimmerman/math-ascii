@@ -1377,6 +1377,54 @@ subtest 'gray_scott_step' => sub {
     is sprintf('%.9f', $v->[0]), sprintf('%.9f', 0.25 + 0.5 * 0.25**2 - 0.1 * 0.25), 'and v gains u v^2 and loses feed plus kill';
 };
 
+subtest 'thomas_velocity' => sub {
+    my $b = 0.208186;
+    is_deeply rounded([ thomas_velocity(0, 0, 0) ]), [ 0, 0, 0 ], 'the origin stands still';
+    is_deeply rounded([ thomas_velocity(1, 0, 0) ]), rounded([ -$b, 0, sin 1 ]), 'worked by hand at (1, 0, 0)';
+    my @turned = grep {
+        my @v = thomas_velocity(@$_);
+        "@{ rounded([ thomas_velocity(@$_[ 1, 2, 0 ]) ]) }" ne "@{ rounded([ @v[ 1, 2, 0 ] ]) }";
+    } [ 0.3, -1.2, 2 ], [ 4, 0.5, -3 ];
+    is_deeply \@turned, [], 'cycling x -> y -> z -> x cycles the velocity the same way';
+    my @path = thomas_points(500);
+    is scalar @path, 500, 'as many points as asked for';
+    is_deeply [ grep { grep { abs > 1 / $b } @$_ } @path ], [], 'and they stay inside the box |x|, |y|, |z| < 1/b';
+};
+
+subtest 'percolation_clusters' => sub {
+    my $labels = percolation_clusters([ [ 1, 1, 0, 1 ], [ 0, 1, 0, 1 ], [ 1, 0, 0, 1 ] ]);
+    is_deeply $labels, [ [ 1, 1, 0, 2 ], [ 0, 1, 0, 2 ], [ 3, 0, 0, 2 ] ],
+        'open squares touching side to side share a cluster, numbered biggest first, then top to bottom';
+
+    my $seed = 5;
+    my $open = [ map { [ map { $seed = next_seed($seed); $seed < 0.6 * 2147483648 ? 1 : 0 } 1 .. 30 ] } 1 .. 20 ];
+    $labels = percolation_clusters($open);
+    my (@split, %size);
+    for my $r (0 .. 19) {
+        for my $c (0 .. 29) {
+            push @split, "$r,$c" if !$open->[$r][$c] != !$labels->[$r][$c];
+            $size{ $labels->[$r][$c] }++ if $labels->[$r][$c];
+            push @split, "$r,$c" if $c < 29 && $open->[$r][$c] && $open->[$r][ $c + 1 ] && $labels->[$r][$c] != $labels->[$r][ $c + 1 ];
+            push @split, "$r,$c" if $r < 19 && $open->[$r][$c] && $open->[ $r + 1 ][$c] && $labels->[$r][$c] != $labels->[ $r + 1 ][$c];
+        }
+    }
+    is_deeply \@split, [], 'on a random grid every open square is labeled and neighbors agree';
+    my @sizes = map { $size{$_} } sort { $a <=> $b } keys %size;
+    is_deeply \@sizes, [ sort { $b <=> $a } @sizes ], 'and bigger clusters get smaller numbers';
+    is_deeply [ sort { $a <=> $b } keys %size ], [ 1 .. keys %size ], 'numbered 1, 2, 3, ... with none skipped';
+};
+
+subtest 'ikeda_points' => sub {
+    my @points = ikeda_points(1000);
+    is scalar @points, 1000, 'as many points as asked for';
+    my @unruly = grep {
+        my ($x, $y) = @{ $points[ $_ - 1 ] };
+        my $t = 0.4 - 6 / (1 + $x**2 + $y**2);
+        abs($points[$_][0] - (1 + 0.9 * ($x * cos($t) - $y * sin($t)))) > 1e-9 || abs($points[$_][1] - 0.9 * ($x * sin($t) + $y * cos($t))) > 1e-9;
+    } 1 .. $#points;
+    is_deeply \@unruly, [], 'each point is the one before turned by 0.4 - 6 / (1 + |z|^2), shrunk by 0.9 and moved 1 right';
+};
+
 subtest 'pi_digits' => sub {
     my @digits = pi_digits(800);
     is scalar @digits, 800, 'as many digits as asked for';
@@ -1651,7 +1699,7 @@ subtest 'cmd_math with no piece lists the pieces' => sub {
     my $server = FakeServer->new;
     my $item   = FakeItem->new;
     cmd_math('', $server, $item);
-    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian arrowhead billiard brownian buddhabrot burningship butterfly cantor cassini caustic chladni clifford clothoid collatz conformal cycloid dipole dragon drum elephant euler fern fibword ford fourier gaussian golden gosper harmonograph henon hilbert hopf hyperbolic julia kepler klein knot koch langton levy life logistic lorenz lyapunov mandelbrot maurer minibrot mobius multibrot newton orbital pascal pendulum penrose phase phoenix piwalk plant pursuit pythagoras quasicrystal recaman ripples rossler rule30 sandpile seahorse spirograph steiner sunflower terdragon tesseract theodorus threebody timestable tongues tricorn truchet turing ulam voronoi weierstrass zeta', 'CLIENTCRAP' ] ];
+    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian arrowhead billiard brownian buddhabrot burningship butterfly cantor cassini caustic chladni clifford clothoid collatz conformal cycloid dipole dragon drum elephant euler fern fibword ford fourier gaussian golden gosper harmonograph henon hilbert hopf hyperbolic ikeda julia kepler klein knot koch langton levy life logistic lorenz lyapunov mandelbrot maurer minibrot mobius multibrot newton orbital pascal pendulum penrose percolation phase phoenix piwalk plant pursuit pythagoras quasicrystal recaman ripples rossler rule30 sandpile seahorse spiral spirograph steiner sunflower terdragon tesseract theodorus thomas threebody timestable tongues tricorn truchet turing ulam voronoi weierstrass zeta', 'CLIENTCRAP' ] ];
     is_deeply $server->{sent}, [], 'nothing was sent';
 };
 
@@ -1709,6 +1757,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'hilbert       the Hilbert curve, one line through all 256 squares of a grid',
             'hopf          the Hopf fibration: circles on a doughnut, every one linked through every other',
             'hyperbolic    the hyperbolic plane in a disk, tiled by same-size pentagons, four to a corner',
+            'ikeda         the Ikeda attractor: light circling a ring cavity, spiraling into chaos',
             'julia         the Julia set called Douady\'s rabbit, ears within ears',
             'kepler        Kepler\'s second law: an orbit cut into months that all sweep the same area',
             'klein         the Klein bottle, a surface with only one side, passing through itself',
@@ -1730,6 +1779,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'pascal        Pascal\'s triangle mod 2, which turns out to be Sierpinski\'s',
             'pendulum      a double pendulum swinging wildly for thirty seconds',
             'penrose       a Penrose tiling: two rhombs covering the plane without ever repeating',
+            'percolation   percolation: squares opened at random, just enough for one cluster to span the grid',
             'phase         a phase portrait: zeros and poles of a complex function as color pinwheels',
             'phoenix       the Phoenix fractal, where each step remembers the one before',
             'piwalk        a walk steered by the first thousand digits of pi',
@@ -1743,12 +1793,14 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'rule30        Wolfram\'s rule 30, one cell growing into chaos',
             'sandpile      the Abelian sandpile: grains dropped on one square, toppling in fours',
             'seahorse      a seahorse tail in Seahorse Valley, 600 times closer',
+            'spiral        a spiral in the Mandelbrot set, 2000 times closer than the whole set',
             'spirograph    a spirograph: a gear rolling inside a ring, drawing loops',
             'steiner       a Steiner chain: a ring of circles that fits however far you turn it',
             'sunflower     seeds placed by the golden angle, falling into Fibonacci spirals',
             'terdragon     the terdragon: every line replaced by three in a zigzag, over and over',
             'tesseract     a tesseract, the four dimensional cube, turned and seen in perspective',
             'theodorus     the spiral of Theodorus: right triangles with sides sqrt 2, sqrt 3, ... sqrt 17',
+            'thomas        Thomas\'s attractor: chaos with three-fold symmetry, seen down its axis',
             'threebody     three bodies chasing each other round a figure eight under gravity',
             'timestable    times tables drawn on a circle, where a cardioid and a nephroid appear',
             'tongues       Arnold tongues: where a kicked circle locks onto a fraction of a turn',
@@ -1884,7 +1936,7 @@ my @usage = (
 subtest 'cmd_math refuses bad input' => sub {
     my $item = FakeItem->new;
     cmd_math('nope', FakeServer->new, $item);
-    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian arrowhead billiard brownian buddhabrot burningship butterfly cantor cassini caustic chladni clifford clothoid collatz conformal cycloid dipole dragon drum elephant euler fern fibword ford fourier gaussian golden gosper harmonograph henon hilbert hopf hyperbolic julia kepler klein knot koch langton levy life logistic lorenz lyapunov mandelbrot maurer minibrot mobius multibrot newton orbital pascal pendulum penrose phase phoenix piwalk plant pursuit pythagoras quasicrystal recaman ripples rossler rule30 sandpile seahorse spirograph steiner sunflower terdragon tesseract theodorus threebody timestable tongues tricorn truchet turing ulam voronoi weierstrass zeta', 'CLIENTERROR' ] ],
+    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian arrowhead billiard brownian buddhabrot burningship butterfly cantor cassini caustic chladni clifford clothoid collatz conformal cycloid dipole dragon drum elephant euler fern fibword ford fourier gaussian golden gosper harmonograph henon hilbert hopf hyperbolic ikeda julia kepler klein knot koch langton levy life logistic lorenz lyapunov mandelbrot maurer minibrot mobius multibrot newton orbital pascal pendulum penrose percolation phase phoenix piwalk plant pursuit pythagoras quasicrystal recaman ripples rossler rule30 sandpile seahorse spiral spirograph steiner sunflower terdragon tesseract theodorus thomas threebody timestable tongues tricorn truchet turing ulam voronoi weierstrass zeta', 'CLIENTERROR' ] ],
         'unknown piece';
 
     @printed = ();
