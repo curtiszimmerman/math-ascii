@@ -4379,17 +4379,21 @@ sub carpet_hole {
     return 0;
 }
 
-# The carpet cut five times, 48 rows tall and 96 pixels across so it's
+# The carpet cut three times, 48 rows tall and 96 pixels across so it's
 # square. The carpet is pale, and each hole is colored by which cut made it,
-# from deep blue for the first to pink.
-my @CARPET_COLORS = map { nearest_color(@$_) } [ 255, 230, 170 ], [ 10, 20, 90 ], [ 40, 70, 200 ], [ 120, 60, 220 ], [ 200, 80, 220 ], [ 255, 120, 220 ];
+# from deep blue for the first to violet. A fourth cut makes holes smaller
+# than a pixel, which come out as noise.
+my @CARPET_COLORS = map { nearest_color(@$_) } [ 255, 230, 170 ], [ 10, 20, 90 ], [ 40, 70, 200 ], [ 120, 60, 220 ];
 
 sub carpet_canvas {
     my @pixels = map {
         my $r = $_;
-        [ map { $_ < 22 || $_ >= 118 ? $BLACK : $CARPET_COLORS[ carpet_hole(($_ - 22 + 0.5) / 96, ($r + 0.5) / 48, 5) ] } 0 .. 139 ];
+        [ map { $_ < 22 || $_ >= 118 ? $BLACK : $CARPET_COLORS[ carpet_hole(($_ - 22 + 0.5) / 96, ($r + 0.5) / 48, 3) ] } 0 .. 139 ];
     } 0 .. 47;
-    return pixels_to_canvas(\@pixels);
+    my $canvas = pixels_to_canvas(\@pixels);
+    put_text($canvas, 0, 0, 'Sierpinski', 97);
+    put_text($canvas, 1, 0, 'carpet',     94);
+    return $canvas;
 }
 
 # Lotka and Volterra's predators and prey: prey x breed at rate 1.1 and get
@@ -4428,7 +4432,7 @@ sub lotka_canvas {
         push @points, map { line_points($pixel->(@{ $orbit[ $_ - 1 ] }), $pixel->(@{ $orbit[$_] }), $k / $#orbits) } 1 .. $#orbit;
     }
     my @rgb = map { [ map { [ 0, 0, 0 ] } 1 .. 140 ] } 1 .. 48;
-    draw_glow_curve(\@rgb, \@points, \@ZETA_HUES, 0.5);
+    draw_glow_curve(\@rgb, \@points, \@ZETA_HUES, 1);
     paint_points(\@rgb, [ $pixel->(4, 2.75) ], [ 255, 255, 255 ]);
     my @palette = (gradient_palette(\@ZETA_HUES), $BLACK, 98);
     my $canvas  = pixels_to_canvas([ map { [ map { nearest_color_in(\@palette, @$_) } @$_ ] } @rgb ]);
@@ -4464,19 +4468,21 @@ sub magnet_escape {
     return;
 }
 
-# Escaping points glow blue and settling ones gold, both brighter the
-# faster they go, with black for the points that do neither.
-my @MAGNET_ESCAPED = ([ 0, 120, 200, 255 ], [ 0.4, 30, 60, 200 ], [ 1, 0, 0, 40 ]);
-my @MAGNET_SETTLED = ([ 0, 255, 230, 140 ], [ 0.4, 255, 130, 0 ], [ 1, 80, 0, 0 ]);
+# Escaping points glow blue and settling ones gold, both dark where they go
+# quickly and brighter the longer they take, which is near the edge of the
+# black points that do neither.
+my @MAGNET_ESCAPED = ([ 0, 0, 0, 40 ], [ 0.5, 30, 60, 200 ], [ 1, 120, 200, 255 ]);
+my @MAGNET_SETTLED = ([ 0, 60, 0, 0 ], [ 0.5, 255, 130, 0 ], [ 1, 255, 230, 140 ]);
 
 sub magnet_canvas {
     my $canvas = sampled_view(
         center_x => 1.5, center_y => 0, half_height => 2.2,
         palette  => [ map { gradient_palette($_) } \@MAGNET_ESCAPED, \@MAGNET_SETTLED ],
+        blur     => 1,
         color    => sub {
             my ($fate, $steps) = magnet_escape($_[0], $_[1], 100);
             return if !defined $fate;
-            return [ gradient_rgb($fate eq 'escaped' ? \@MAGNET_ESCAPED : \@MAGNET_SETTLED, log($steps) / log(100)) ];
+            return [ gradient_rgb($fate eq 'escaped' ? \@MAGNET_ESCAPED : \@MAGNET_SETTLED, log($steps / 3) / log(40 / 3)) ];
         },
     );
     put_text($canvas, 0, 1, 'z -> ((z^2 + c - 1) / (2z + c - 2))^2', 97);
@@ -4598,6 +4604,10 @@ our %PIECES = (
     percolation => { draw => \&percolation_canvas, about => 'percolation: squares opened at random, just enough for one cluster to span the grid' },
     spiral     => { draw => \&spiral_canvas,     about => 'a spiral in the Mandelbrot set, 2000 times closer than the whole set' },
     ikeda      => { draw => \&ikeda_canvas,      about => 'the Ikeda attractor: light circling a ring cavity, spiraling into chaos' },
+    carpet     => { draw => \&carpet_canvas,     about => 'Sierpinski\'s carpet: a square with its middle ninth cut out, over and over' },
+    lotka      => { draw => \&lotka_canvas,      about => 'foxes and rabbits: predators and prey booming and crashing round and round' },
+    magnet     => { draw => \&magnet_canvas,     about => 'the magnet fractal, from a model of magnetism, where points can escape or settle' },
+    ising      => { draw => \&ising_canvas,      about => 'the Ising model: a magnet at the temperature where it\'s about to pick a side' },
     hopf       => { draw => \&hopf_canvas,       about => 'the Hopf fibration: circles on a doughnut, every one linked through every other' },
     burningship => { draw => \&burningship_canvas, about => 'the Burning Ship fractal, z^2 + c with the orbit folded' },
     dragon     => { draw => \&dragon_canvas,     about => 'the Heighway dragon, a strip of paper folded in half eight times' },

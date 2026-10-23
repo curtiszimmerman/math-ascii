@@ -1468,9 +1468,11 @@ subtest 'magnet_step' => sub {
 subtest 'magnet_escape' => sub {
     is_deeply [ magnet_escape(1.5, 0, 100) ], [ 'settled', 1 ], 'at c = 1.5 the first step lands on 1';
     is_deeply [ magnet_escape(1, 0, 50) ], [], 'at c = 1 it sits at 0 forever';
-    for my $c ([ -1, 1.2 ], [ 3, 0.5 ], [ 0.6, 2.1 ], [ 5, 4 ]) {
+    for my $case ([ -0.25, 1, 'escaped' ], [ 0, 1.5, 'escaped' ], [ -2, 0.5, 'settled' ], [ 3, 0.5, 'settled' ]) {
+        my ($cx, $cy, $expected) = @$case;
+        my $c = [ $cx, $cy ];
         my ($fate, $steps) = magnet_escape(@$c, 200);
-        next if !defined $fate;
+        is $fate, $expected, "c = @$c $expected";
         my ($x, $y) = (0, 0);
         ($x, $y) = magnet_step($x, $y, @$c) for 1 .. $steps;
         my $size = $fate eq 'settled' ? ($x - 1)**2 + $y**2 : $x**2 + $y**2;
@@ -1798,7 +1800,7 @@ subtest 'cmd_math with no piece lists the pieces' => sub {
     my $server = FakeServer->new;
     my $item   = FakeItem->new;
     cmd_math('', $server, $item);
-    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian arrowhead billiard brownian buddhabrot burningship butterfly cantor cassini caustic chladni clifford clothoid collatz conformal cycloid dipole dragon drum elephant euler fern fibword ford fourier gaussian golden gosper harmonograph henon hilbert hopf hyperbolic ikeda julia kepler klein knot koch langton levy life logistic lorenz lyapunov mandelbrot maurer minibrot mobius multibrot newton orbital pascal pendulum penrose percolation phase phoenix piwalk plant pursuit pythagoras quasicrystal recaman ripples rossler rule30 sandpile seahorse spiral spirograph steiner sunflower terdragon tesseract theodorus thomas threebody timestable tongues tricorn truchet turing ulam voronoi weierstrass zeta', 'CLIENTCRAP' ] ];
+    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian arrowhead billiard brownian buddhabrot burningship butterfly cantor carpet cassini caustic chladni clifford clothoid collatz conformal cycloid dipole dragon drum elephant euler fern fibword ford fourier gaussian golden gosper harmonograph henon hilbert hopf hyperbolic ikeda ising julia kepler klein knot koch langton levy life logistic lorenz lotka lyapunov magnet mandelbrot maurer minibrot mobius multibrot newton orbital pascal pendulum penrose percolation phase phoenix piwalk plant pursuit pythagoras quasicrystal recaman ripples rossler rule30 sandpile seahorse spiral spirograph steiner sunflower terdragon tesseract theodorus thomas threebody timestable tongues tricorn truchet turing ulam voronoi weierstrass zeta', 'CLIENTCRAP' ] ];
     is_deeply $server->{sent}, [], 'nothing was sent';
 };
 
@@ -1831,6 +1833,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'burningship   the Burning Ship fractal, z^2 + c with the orbit folded',
             'butterfly     Fay\'s butterfly curve, twelve turns of a polar curve',
             'cantor        the devil\'s staircase, climbing only on the Cantor set',
+            'carpet        Sierpinski\'s carpet: a square with its middle ninth cut out, over and over',
             'cassini       Cassini ovals: the curves where the distances to two points multiply to the same number',
             'caustic       the bright cusped curve that light draws in the bottom of a coffee cup',
             'chladni       sand on a ringing metal plate, gathered on the lines that stand still',
@@ -1857,6 +1860,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'hopf          the Hopf fibration: circles on a doughnut, every one linked through every other',
             'hyperbolic    the hyperbolic plane in a disk, tiled by same-size pentagons, four to a corner',
             'ikeda         the Ikeda attractor: light circling a ring cavity, spiraling into chaos',
+            'ising         the Ising model: a magnet at the temperature where it\'s about to pick a side',
             'julia         the Julia set called Douady\'s rabbit, ears within ears',
             'kepler        Kepler\'s second law: an orbit cut into months that all sweep the same area',
             'klein         the Klein bottle, a surface with only one side, passing through itself',
@@ -1867,7 +1871,9 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'life          Conway\'s Game of Life: a glider gun firing gliders, with trails',
             'logistic      the logistic map doubling its period over and over until it turns to chaos',
             'lorenz        the Lorenz attractor, the butterfly of chaos',
+            'lotka         foxes and rabbits: predators and prey booming and crashing round and round',
             'lyapunov      a Lyapunov fractal: where a logistic map flipping between two rates settles or turns to chaos',
+            'magnet        the magnet fractal, from a model of magnetism, where points can escape or settle',
             'mandelbrot    the whole Mandelbrot set, glowing toward its edge',
             'maurer        a Maurer rose: a walk round a rose in steps of 71 degrees',
             'minibrot      a tiny copy of the Mandelbrot set, out on its needle',
@@ -2035,7 +2041,7 @@ my @usage = (
 subtest 'cmd_math refuses bad input' => sub {
     my $item = FakeItem->new;
     cmd_math('nope', FakeServer->new, $item);
-    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian arrowhead billiard brownian buddhabrot burningship butterfly cantor cassini caustic chladni clifford clothoid collatz conformal cycloid dipole dragon drum elephant euler fern fibword ford fourier gaussian golden gosper harmonograph henon hilbert hopf hyperbolic ikeda julia kepler klein knot koch langton levy life logistic lorenz lyapunov mandelbrot maurer minibrot mobius multibrot newton orbital pascal pendulum penrose percolation phase phoenix piwalk plant pursuit pythagoras quasicrystal recaman ripples rossler rule30 sandpile seahorse spiral spirograph steiner sunflower terdragon tesseract theodorus thomas threebody timestable tongues tricorn truchet turing ulam voronoi weierstrass zeta', 'CLIENTERROR' ] ],
+    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian arrowhead billiard brownian buddhabrot burningship butterfly cantor carpet cassini caustic chladni clifford clothoid collatz conformal cycloid dipole dragon drum elephant euler fern fibword ford fourier gaussian golden gosper harmonograph henon hilbert hopf hyperbolic ikeda ising julia kepler klein knot koch langton levy life logistic lorenz lotka lyapunov magnet mandelbrot maurer minibrot mobius multibrot newton orbital pascal pendulum penrose percolation phase phoenix piwalk plant pursuit pythagoras quasicrystal recaman ripples rossler rule30 sandpile seahorse spiral spirograph steiner sunflower terdragon tesseract theodorus thomas threebody timestable tongues tricorn truchet turing ulam voronoi weierstrass zeta', 'CLIENTERROR' ] ],
         'unknown piece';
 
     @printed = ();
