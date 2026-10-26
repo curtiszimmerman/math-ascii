@@ -4549,6 +4549,180 @@ sub ising_canvas {
     return $canvas;
 }
 
+# The tribonacci word: start from 1 and rewrite 1 -> 12, 2 -> 13, 3 -> 1
+# over and over. Each round's word starts with the last one, so we keep
+# going until it's $length long and cut it there.
+sub tribonacci_word {
+    my ($length) = @_;
+    my $word = '1';
+    $word = join '', map { { 1 => '12', 2 => '13', 3 => '1' }->{$_} } split //, $word while length $word < $length;
+    return substr $word, 0, $length;
+}
+
+# The Rauzy fractal. Walk through the tribonacci word stepping one way in
+# 3D for each letter, and the walk heads off along the direction the
+# rewriting stretches. Seen straight down that direction, what's left is a
+# flat walk that never wanders far: each 1 adds a, each 2 adds (a + 1) / a,
+# and each 3 adds 1, where a is the complex root of x^3 = x^2 + x + 1 inside
+# the unit circle. Returns $count points [x, y, letter], each tagged with the
+# letter about to be read.
+sub rauzy_points {
+    my ($count) = @_;
+    # The real root first, by Newton's method. The other two then multiply
+    # to 1 / root and add up to 1 - root.
+    my $root = 2;
+    $root -= ($root**3 - $root**2 - $root - 1) / (3 * $root**2 - 2 * $root - 1) for 1 .. 20;
+    my ($ax, $ay) = ((1 - $root) / 2, sqrt(4 / $root - (1 - $root)**2) / 2);
+    my $size = $ax**2 + $ay**2;
+    my %step = (
+        1 => [ $ax, $ay ],
+        2 => [ (($ax + 1) * $ax + $ay * $ay) / $size, ($ay * $ax - ($ax + 1) * $ay) / $size ],
+        3 => [ 1, 0 ],
+    );
+    my ($x, $y) = (0, 0);
+    my @points;
+    for my $letter (split //, tribonacci_word($count)) {
+        push @points, [ $x, $y, $letter ];
+        $x += $step{$letter}[0];
+        $y += $step{$letter}[1];
+    }
+    return @points;
+}
+
+# The fractal splits into three tiles by which letter comes next, each a
+# shrunken copy of the whole. Every pixel takes the letter most of its
+# points have.
+my @RAUZY_COLORS = map { nearest_color(@$_) } [ 255, 170, 0 ], [ 0, 170, 220 ], [ 220, 40, 120 ];
+
+sub rauzy_canvas {
+    my @points = rauzy_points(60_000);
+    my $pixel  = fit_to_frame(\@points);
+    my %votes;
+    for my $point (@points) {
+        my ($row, $col) = @{ $pixel->(@$point[ 0, 1 ]) };
+        $votes{ POSIX::floor($row + 0.5) . ',' . POSIX::floor($col + 0.5) }[ $point->[2] - 1 ]++;
+    }
+    my @pixels = map {
+        my $r = $_;
+        [ map {
+            my $tally = $votes{"$r,$_"};
+            $tally ? $RAUZY_COLORS[ List::Util::reduce { ($tally->[$a] // 0) >= ($tally->[$b] // 0) ? $a : $b } 0 .. 2 ] : $BLACK;
+        } 0 .. 139 ];
+    } 0 .. 47;
+    my $canvas = pixels_to_canvas(\@pixels);
+    put_text($canvas, 0, 1, 'the Rauzy fractal', 97);
+    put_text($canvas, 1, 1, '1 -> 12, 2 -> 13, 3 -> 1', 94);
+    return $canvas;
+}
+
+# Pickover's biomorphs: z -> z^3 + c from z = (x, y), stopping once either
+# part of z or z itself passes 10. Pickover then counted a point in if
+# either part was still under 10, which is what grows the whiskers: orbits
+# that fly off along an axis count. Returns the steps taken for a point in
+# (all $max_steps if it never left), or nothing for a point out.
+sub biomorph {
+    my ($x, $y, $cx, $cy, $max_steps) = @_;
+    for my $step (1 .. $max_steps) {
+        ($x, $y) = ($x**3 - 3 * $x * $y * $y + $cx, 3 * $x * $x * $y - $y**3 + $cy);
+        next if abs($x) < 10 && abs($y) < 10 && $x * $x + $y * $y < 100;
+        return abs($x) < 10 || abs($y) < 10 ? $step : undef;
+    }
+    return $max_steps;
+}
+
+# Pickover's radiolarian at c = 0.5. The body, which never leaves, is pale
+# green, and the whiskers glow from teal to deep blue the faster they fly.
+# Points that fly off on the very first step are left black, or they'd
+# paint the whole outside.
+my @BIOMORPH_HUES = ([ 0, 0, 40, 120 ], [ 0.5, 0, 160, 200 ], [ 1, 180, 255, 200 ]);
+
+sub biomorph_canvas {
+    my $canvas = sampled_view(
+        center_x => 0, center_y => 0, half_height => 1.5,
+        palette  => [ gradient_palette(\@BIOMORPH_HUES) ],
+        color    => sub {
+            my $steps = biomorph(@_, 0.5, 0, 40);
+            return defined $steps && $steps > 1 ? [ gradient_rgb(\@BIOMORPH_HUES, ($steps - 2) / 5) ] : undef;
+        },
+    );
+    put_text($canvas, 0, 1, 'a biomorph:',          97);
+    put_text($canvas, 1, 1, 'z -> z^3 + 0.5',      94);
+    return $canvas;
+}
+
+# Harper's model of an electron hopping on a square lattice in a magnetic
+# field, with p/q flux quanta through each square. Going along one row,
+# each site's energy is shifted by 2 cos(2 pi n p/q + theta), and an
+# electron with energy E can travel through when the trace of the transfer
+# matrices [[E - shift, -1], [1, 0]] over one period is small enough. The
+# trace only depends on theta through -2 cos(q theta), so taking theta =
+# pi / 2q leaves the part D(E) that doesn't, and E is in the spectrum for
+# some theta exactly when |D(E)| <= 4. p/q has to be in lowest terms.
+sub harper_trace {
+    my ($energy, $p, $q) = @_;
+    my $pi    = 4 * atan2(1, 1);
+    my $theta = $pi / (2 * $q);
+    my ($m11, $m12, $m21, $m22) = (1, 0, 0, 1);
+    for my $n (1 .. $q) {
+        my $diagonal = $energy - 2 * cos(2 * $pi * $p * $n / $q + $theta);
+        ($m11, $m12, $m21, $m22) = ($diagonal * $m11 - $m21, $diagonal * $m12 - $m22, $m11, $m12);
+    }
+    return $m11 + $m22;
+}
+
+# Hofstadter's butterfly: the energies E from -4 to 4 across, and the flux
+# from 0 at the bottom to 1 at the top. Each row draws every fraction p/q
+# with q up to 24 that falls in it. A pixel lights when one of its samples
+# is in a band, or when D(E) jumps from above 4 to below -4 between two of
+# them, since a band can be far narrower than a sample.
+my @HOFSTADTER_HUES = ([ 0, 255, 60, 180 ], [ 0.5, 120, 80, 255 ], [ 1, 0, 200, 255 ]);
+
+sub hofstadter_canvas {
+    my $samples = 4;
+    my @palette = gradient_palette(\@HOFSTADTER_HUES);
+    my @pixels  = map { [ ($BLACK) x 140 ] } 1 .. 48;
+    for my $q (1 .. 24) {
+        for my $p (0 .. $q) {
+            next if List::Util::first { $p % $_ == 0 && $q % $_ == 0 } 2 .. $q;
+            my $row   = 47 - List::Util::min(47, POSIX::floor(48 * $p / $q));
+            my $color = nearest_color_in(\@palette, gradient_rgb(\@HOFSTADTER_HUES, $p / $q));
+            my @trace = map { harper_trace(-4 + 8 * $_ / (140 * $samples), $p, $q) } 0 .. 140 * $samples;
+            for my $col (0 .. 139) {
+                my @here = @trace[ $col * $samples .. ($col + 1) * $samples ];
+                my $lit  = List::Util::any { abs($_) <= 4 } @here;
+                $lit ||= List::Util::any { $here[ $_ - 1 ] * $here[$_] < 0 } 1 .. $#here;
+                $pixels[$row][$col] = $color if $lit;
+            }
+        }
+    }
+    return pixels_to_canvas(\@pixels);
+}
+
+# A point t of the way round an ellipse with half-axes a and b, turned by
+# $tilt, as [x, y].
+sub galaxy_point {
+    my ($a, $b, $tilt, $t) = @_;
+    my ($u, $v) = ($a * cos $t, $b * sin $t);
+    return [ $u * cos($tilt) - $v * sin($tilt), $u * sin($tilt) + $v * cos($tilt) ];
+}
+
+# The density wave picture of a spiral galaxy: stars on nested ellipses,
+# each turned a little more than the one inside it. Nothing spirals, but the
+# ellipses crowd together along two arms. Each ring's hue runs from the
+# core outward. Ten rings is as many as fit before they run together.
+sub galaxy_canvas {
+    my $rings = 10;
+    my @points;
+    for my $k (1 .. $rings) {
+        my @ring = map { centered_pixel(@{ galaxy_point(0.2 * $k, 0.14 * $k, 0.25 * $k, $_ * 8 * atan2(1, 1) / 300) }, 22) } 0 .. 300;
+        push @points, map { line_points($ring[ $_ - 1 ], $ring[$_], $k / $rings) } 1 .. 300;
+    }
+    my $canvas = glow_lines_canvas(\@points, \@ZETA_HUES, 0.5);
+    put_text($canvas, 0, 1, 'a spiral galaxy', 97);
+    put_text($canvas, 1, 1, 'from tilted ellipses', 94);
+    return $canvas;
+}
+
 our %PIECES = (
     mandelbrot => { draw => \&mandelbrot_canvas, about => 'the whole Mandelbrot set, glowing toward its edge' },
     seahorse   => { draw => \&seahorse_canvas,   about => 'a seahorse tail in Seahorse Valley, 600 times closer' },
@@ -4608,6 +4782,10 @@ our %PIECES = (
     lotka      => { draw => \&lotka_canvas,      about => 'foxes and rabbits: predators and prey booming and crashing round and round' },
     magnet     => { draw => \&magnet_canvas,     about => 'the magnet fractal, from a model of magnetism, where points can escape or settle' },
     ising      => { draw => \&ising_canvas,      about => 'the Ising model: a magnet at the temperature where it\'s about to pick a side' },
+    rauzy      => { draw => \&rauzy_canvas,      about => 'the Rauzy fractal: a walk through the tribonacci word, seen end on' },
+    biomorph   => { draw => \&biomorph_canvas,   about => 'a biomorph: Pickover\'s creature, grown from z^3 + c and a lucky bug' },
+    hofstadter => { draw => \&hofstadter_canvas, about => 'Hofstadter\'s butterfly: the energies of an electron in a magnetic field' },
+    galaxy     => { draw => \&galaxy_canvas,     about => 'a spiral galaxy drawn with ellipses, each turned a little more than the last' },
     hopf       => { draw => \&hopf_canvas,       about => 'the Hopf fibration: circles on a doughnut, every one linked through every other' },
     burningship => { draw => \&burningship_canvas, about => 'the Burning Ship fractal, z^2 + c with the orbit folded' },
     dragon     => { draw => \&dragon_canvas,     about => 'the Heighway dragon, a strip of paper folded in half eight times' },

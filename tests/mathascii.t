@@ -1526,6 +1526,65 @@ subtest 'ising_sweep' => sub {
     ok $magnetization->(5) < 0.3, 'hot, it melts into a mix of up and down';
 };
 
+subtest 'tribonacci_word' => sub {
+    is tribonacci_word(13), '1213121121312', '1 -> 12, 2 -> 13, 3 -> 1, starting from 1';
+    my $word = tribonacci_word(20000);
+    is length $word, 20000, 'as long as asked for';
+    my %count;
+    $count{$_}++ for split //, $word;
+    ok abs($count{1} / $count{2} - 1.839286755) < 1e-3, '1s outnumber 2s by the tribonacci constant';
+    ok abs($count{2} / $count{3} - 1.839286755) < 1e-3, 'and 2s outnumber 3s by it too';
+};
+
+subtest 'rauzy_points' => sub {
+    my @points = rauzy_points(5000);
+    is scalar @points, 5000, 'as many points as asked for';
+    is join('', map { $_->[2] } @points[ 0 .. 6 ]), '1213121', 'each is tagged with the letter that comes next';
+    is_deeply rounded([ @{ $points[0] }[ 0, 1 ] ]), [ 0, 0 ], 'the empty start sits at 0';
+
+    # The second point is the 1 step, which lands on the small root of
+    # x^3 = x^2 + x + 1.
+    my ($ax, $ay) = @{ $points[1] }[ 0, 1 ];
+    my ($sx, $sy) = ($ax * $ax - $ay * $ay, 2 * $ax * $ay);
+    my ($cx, $cy) = ($sx * $ax - $sy * $ay, $sx * $ay + $sy * $ax);
+    ok abs($cx - $sx - $ax - 1) < 1e-9 && abs($cy - $sy - $ay) < 1e-9, 'one step of 1 lands on a root of x^3 = x^2 + x + 1';
+    ok $ax**2 + $ay**2 < 1, 'the one inside the unit circle';
+    my $size = $ax**2 + $ay**2;
+    my ($two_x, $two_y) = (($ax + 1) * $ax / $size + $ay * $ay / $size, ($ay * $ax - ($ax + 1) * $ay) / $size);
+    is_deeply rounded([ @{ $points[2] }[ 0, 1 ] ]), rounded([ $ax + $two_x, $ay + $two_y ]), 'a 2 step adds (a + 1) / a';
+    is_deeply [ grep { $_->[0]**2 + $_->[1]**2 > 9 } @points ], [], 'and it never wanders off';
+};
+
+subtest 'biomorph' => sub {
+    ok defined biomorph(0, 0, 0, 0, 50), 'z = 0 with c = 0 stays put, inside';
+    ok !defined biomorph(100, 100, 0, 0, 50), '(100 + 100i)^3 = 10^6(-2 + 2i) is far out both ways, outside';
+    is biomorph(100, 0, 0, 0, 50), 1, '100^3 is far out, but only along the real line, so it counts as inside';
+    is biomorph(2, 0, 0.5, 0, 50), 2, '2 -> 8.5 -> 614.6, still real';
+};
+
+subtest 'harper_trace' => sub {
+    my @wrong = grep { abs(harper_trace($_, 0, 1) - $_) > 1e-9 } -5, -1, 0.3, 4;
+    is_deeply \@wrong, [], 'with no field the trace is just E, so the band is -4 to 4';
+    @wrong = grep { abs(harper_trace($_, 1, 2) - ($_ * $_ - 4)) > 1e-9 } -3, -1, 0.5, 2;
+    is_deeply \@wrong, [], 'at half a flux quantum it is E^2 - 4, so the bands reach 2 sqrt 2';
+    my @lopsided = grep {
+        my ($e, $p, $q) = @$_;
+        abs(harper_trace($e, $p, $q) - harper_trace(-$e, $p, $q) * (-1)**$q) > 1e-9 || abs(harper_trace($e, $p, $q) - harper_trace($e, $q - $p, $q)) > 1e-9;
+    } [ 1.3, 1, 3 ], [ -0.7, 2, 5 ], [ 2.2, 3, 7 ];
+    is_deeply \@lopsided, [], 'flipping E or the flux gives the same spectrum';
+};
+
+subtest 'galaxy_point' => sub {
+    is_deeply rounded(galaxy_point(3, 2, 0, 0)), [ 3, 0 ], 'an untilted ellipse starts at the end of its long axis';
+    is_deeply rounded(galaxy_point(3, 2, 0, atan2(1, 0))), [ 0, 2 ], 'and a quarter of the way round reaches the short one';
+    my @off = grep {
+        my ($x, $y) = @{ galaxy_point(3, 2, 0.7, $_) };
+        my ($u, $v) = ($x * cos(0.7) + $y * sin(0.7), -$x * sin(0.7) + $y * cos(0.7));
+        abs(($u / 3)**2 + ($v / 2)**2 - 1) > 1e-9;
+    } 0.1, 1, 2.5, 4;
+    is_deeply \@off, [], 'tilted, it is the same ellipse turned';
+};
+
 subtest 'pi_digits' => sub {
     my @digits = pi_digits(800);
     is scalar @digits, 800, 'as many digits as asked for';
@@ -1800,7 +1859,7 @@ subtest 'cmd_math with no piece lists the pieces' => sub {
     my $server = FakeServer->new;
     my $item   = FakeItem->new;
     cmd_math('', $server, $item);
-    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian arrowhead billiard brownian buddhabrot burningship butterfly cantor carpet cassini caustic chladni clifford clothoid collatz conformal cycloid dipole dragon drum elephant euler fern fibword ford fourier gaussian golden gosper harmonograph henon hilbert hopf hyperbolic ikeda ising julia kepler klein knot koch langton levy life logistic lorenz lotka lyapunov magnet mandelbrot maurer minibrot mobius multibrot newton orbital pascal pendulum penrose percolation phase phoenix piwalk plant pursuit pythagoras quasicrystal recaman ripples rossler rule30 sandpile seahorse spiral spirograph steiner sunflower terdragon tesseract theodorus thomas threebody timestable tongues tricorn truchet turing ulam voronoi weierstrass zeta', 'CLIENTCRAP' ] ];
+    is_deeply $item->{printed}, [ [ 'math: pieces: apollonian arrowhead billiard biomorph brownian buddhabrot burningship butterfly cantor carpet cassini caustic chladni clifford clothoid collatz conformal cycloid dipole dragon drum elephant euler fern fibword ford fourier galaxy gaussian golden gosper harmonograph henon hilbert hofstadter hopf hyperbolic ikeda ising julia kepler klein knot koch langton levy life logistic lorenz lotka lyapunov magnet mandelbrot maurer minibrot mobius multibrot newton orbital pascal pendulum penrose percolation phase phoenix piwalk plant pursuit pythagoras quasicrystal rauzy recaman ripples rossler rule30 sandpile seahorse spiral spirograph steiner sunflower terdragon tesseract theodorus thomas threebody timestable tongues tricorn truchet turing ulam voronoi weierstrass zeta', 'CLIENTCRAP' ] ];
     is_deeply $server->{sent}, [], 'nothing was sent';
 };
 
@@ -1828,6 +1887,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'apollonian    the Apollonian gasket, every gap between circles filled with another circle',
             'arrowhead     Sierpinski\'s arrowhead curve: one line that traces Sierpinski\'s triangle',
             'billiard      a billiard ball in an ellipse, its path never crossing a smaller ellipse inside',
+            'biomorph      a biomorph: Pickover\'s creature, grown from z^3 + c and a lucky bug',
             'brownian      a Brownian tree: grains wander in at random and stick where they first touch',
             'buddhabrot    the Buddhabrot: the paths of every point that escapes the Mandelbrot set',
             'burningship   the Burning Ship fractal, z^2 + c with the orbit folded',
@@ -1851,12 +1911,14 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'fibword       the Fibonacci word fractal: a turn after every 0 in 0100101001001...',
             'ford          Ford circles: a circle on every fraction, and neighbors always touch',
             'fourier       a square wave built from sine waves, overshooting at every corner',
+            'galaxy        a spiral galaxy drawn with ellipses, each turned a little more than the last',
             'gaussian      the Gaussian primes: the primes among the complex numbers a + bi',
             'golden        the golden spiral, drawn through squares whose sides are the Fibonacci numbers',
             'gosper        the flowsnake: Gosper\'s curve, seven copies of itself on a hexagonal grid',
             'harmonograph  two damped pendulums drawing on paper, spiraling in as they tire',
             'henon         the Henon attractor: a map that stretches and folds, leaving layers within layers',
             'hilbert       the Hilbert curve, one line through all 256 squares of a grid',
+            'hofstadter    Hofstadter\'s butterfly: the energies of an electron in a magnetic field',
             'hopf          the Hopf fibration: circles on a doughnut, every one linked through every other',
             'hyperbolic    the hyperbolic plane in a disk, tiled by same-size pentagons, four to a corner',
             'ikeda         the Ikeda attractor: light circling a ring cavity, spiraling into chaos',
@@ -1892,6 +1954,7 @@ subtest 'cmd_math -l lists the pieces with what each one is' => sub {
             'pursuit       four bugs at the corners of a square, each chasing the next into a whirl',
             'pythagoras    the Pythagoras tree: squares on the sides of right triangles, branching forever',
             'quasicrystal  seven waves added up into a pattern that never repeats',
+            'rauzy         the Rauzy fractal: a walk through the tribonacci word, seen end on',
             'recaman       Recaman\'s sequence: hop back if you can, forward if you can\'t, drawn as arcs',
             'ripples       ripples from two stones meeting, calm wherever they cancel',
             'rossler       the Rossler attractor: chaos from a spiral with a single fold',
@@ -2041,7 +2104,7 @@ my @usage = (
 subtest 'cmd_math refuses bad input' => sub {
     my $item = FakeItem->new;
     cmd_math('nope', FakeServer->new, $item);
-    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian arrowhead billiard brownian buddhabrot burningship butterfly cantor carpet cassini caustic chladni clifford clothoid collatz conformal cycloid dipole dragon drum elephant euler fern fibword ford fourier gaussian golden gosper harmonograph henon hilbert hopf hyperbolic ikeda ising julia kepler klein knot koch langton levy life logistic lorenz lotka lyapunov magnet mandelbrot maurer minibrot mobius multibrot newton orbital pascal pendulum penrose percolation phase phoenix piwalk plant pursuit pythagoras quasicrystal recaman ripples rossler rule30 sandpile seahorse spiral spirograph steiner sunflower terdragon tesseract theodorus thomas threebody timestable tongues tricorn truchet turing ulam voronoi weierstrass zeta', 'CLIENTERROR' ] ],
+    is_deeply $item->{printed}, [ [ 'math: no piece called "nope". pieces: apollonian arrowhead billiard biomorph brownian buddhabrot burningship butterfly cantor carpet cassini caustic chladni clifford clothoid collatz conformal cycloid dipole dragon drum elephant euler fern fibword ford fourier galaxy gaussian golden gosper harmonograph henon hilbert hofstadter hopf hyperbolic ikeda ising julia kepler klein knot koch langton levy life logistic lorenz lotka lyapunov magnet mandelbrot maurer minibrot mobius multibrot newton orbital pascal pendulum penrose percolation phase phoenix piwalk plant pursuit pythagoras quasicrystal rauzy recaman ripples rossler rule30 sandpile seahorse spiral spirograph steiner sunflower terdragon tesseract theodorus thomas threebody timestable tongues tricorn truchet turing ulam voronoi weierstrass zeta', 'CLIENTERROR' ] ],
         'unknown piece';
 
     @printed = ();
