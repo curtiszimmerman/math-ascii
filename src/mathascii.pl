@@ -4723,6 +4723,209 @@ sub galaxy_canvas {
     return $canvas;
 }
 
+# A random domino tiling of the Aztec diamond of the given order: the
+# squares (x, y), by their lower left corners, with |x + 1/2| + |y + 1/2| at
+# most the order. Every tiling is equally likely. Returns a hash from each
+# domino's lower left square "x,y" to its type: N and S lie flat, E and W
+# stand up.
+#
+# This is domino shuffling, which grows the diamond one order at a time.
+# Each type is a direction, and every domino takes a step that way. First,
+# any N with an S right on top of it, or E with a W right beside it, would
+# walk into each other, so those pairs are taken out. Then everything steps,
+# which leaves the new, bigger diamond with only 2x2 holes. Each hole gets
+# two dominoes at random, both flat (S below, N above) or both standing
+# (W left, E right), so they'll step apart next time.
+sub aztec_tiling {
+    my ($order, $seed) = @_;
+    my %step = (N => [ 0, 1 ], S => [ 0, -1 ], E => [ 1, 0 ], W => [ -1, 0 ]);
+    my %dominoes;
+    for my $size (1 .. $order) {
+        for my $key (keys %dominoes) {
+            my ($x, $y) = split /,/, $key;
+            my $type = $dominoes{$key} // next;
+            my $facing = $type eq 'N' ? "$x," . ($y + 1) : $type eq 'E' ? ($x + 1) . ",$y" : next;
+            delete @dominoes{ $key, $facing } if ($dominoes{$facing} // '') eq ($type eq 'N' ? 'S' : 'W');
+        }
+        my (%moved, %covered);
+        for my $key (keys %dominoes) {
+            my ($x, $y) = split /,/, $key;
+            my $type = $dominoes{$key};
+            ($x, $y) = ($x + $step{$type}[0], $y + $step{$type}[1]);
+            $moved{"$x,$y"} = $type;
+            $covered{$_} = 1 for "$x,$y", $type =~ /[NS]/ ? ($x + 1) . ",$y" : "$x," . ($y + 1);
+        }
+        # Going up the rows and along each, the first empty square we meet
+        # is always the lower left corner of a hole.
+        for my $y (-$size .. $size - 1) {
+            for my $x (-$size .. $size - 1) {
+                next if $covered{"$x,$y"} || abs($x + 0.5) + abs($y + 0.5) > $size;
+                $seed = next_seed($seed);
+                if ($seed < 1073741824) {
+                    @moved{ "$x,$y", "$x," . ($y + 1) } = ('S', 'N');
+                }
+                else {
+                    @moved{ "$x,$y", ($x + 1) . ",$y" } = ('W', 'E');
+                }
+                $covered{$_} = 1 for "$x,$y", ($x + 1) . ",$y", "$x," . ($y + 1), ($x + 1) . ',' . ($y + 1);
+            }
+        }
+        %dominoes = %moved;
+    }
+    return \%dominoes;
+}
+
+# Order 24, which is 48 squares tall, each square two pixels wide. Near the
+# four corners every domino is forced to line up the same way, and the
+# tiling only gets random inside a circle touching all four sides, the
+# arctic circle.
+my %AZTEC_COLORS = (N => [ 255, 60, 60 ], S => [ 255, 200, 0 ], E => [ 40, 120, 255 ], W => [ 40, 200, 90 ]);
+
+sub aztec_canvas {
+    my $tiling = aztec_tiling(24, 20261027);
+    my %color  = map { $_ => nearest_color(@{ $AZTEC_COLORS{$_} }) } keys %AZTEC_COLORS;
+    my @pixels = map { [ ($BLACK) x 140 ] } 1 .. 48;
+    for my $key (keys %$tiling) {
+        my ($x, $y) = split /,/, $key;
+        my $type = $tiling->{$key};
+        for my $square ([ $x, $y ], $type =~ /[NS]/ ? [ $x + 1, $y ] : [ $x, $y + 1 ]) {
+            my ($row, $col) = (23 - $square->[1], 70 + 2 * $square->[0]);
+            @{ $pixels[$row] }[ $col, $col + 1 ] = ($color{$type}) x 2;
+        }
+    }
+    my $canvas = pixels_to_canvas(\@pixels);
+    put_text($canvas, 0, 1, 'the arctic circle:', 97);
+    put_text($canvas, 1, 1, 'dominoes at random', 94);
+    put_text($canvas, 2, 1, 'in an Aztec diamond', 94);
+    return $canvas;
+}
+
+# Rotor-router aggregation: every square has an arrow, all pointing east to
+# start. Particles are dropped at the origin one at a time. A particle on a
+# taken square turns that square's arrow a quarter turn counterclockwise
+# and moves the way it now points, until it reaches an empty square and
+# stays. Nothing is random, yet the cluster grows into an almost perfect
+# disk. Returns a hash from each taken square "x,y" to which particle took
+# it, counting from 1.
+sub rotor_cluster {
+    my ($count) = @_;
+    my @steps = ([ 1, 0 ], [ 0, 1 ], [ -1, 0 ], [ 0, -1 ]);
+    my (%arrow, %taken_by);
+    for my $particle (1 .. $count) {
+        my ($x, $y) = (0, 0);
+        while (exists $arrow{"$x,$y"}) {
+            my $turn = $arrow{"$x,$y"} = ($arrow{"$x,$y"} + 1) % 4;
+            ($x, $y) = ($x + $steps[$turn][0], $y + $steps[$turn][1]);
+        }
+        $arrow{"$x,$y"}    = 0;
+        $taken_by{"$x,$y"} = $particle;
+    }
+    return \%taken_by;
+}
+
+# 1700 particles fill the frame's height. Each square, two pixels wide, is
+# colored by when it was taken, so the bands of color show how round the
+# cluster stays the whole time it grows. The arrows themselves look like
+# noise at this size.
+my @ROTOR_HUES = ([ 0, 255, 255, 200 ], [ 0.25, 255, 200, 0 ], [ 0.5, 255, 60, 60 ], [ 0.75, 160, 40, 220 ], [ 1, 30, 90, 255 ]);
+
+sub rotor_canvas {
+    my $count   = 1700;
+    my $taken   = rotor_cluster($count);
+    my @palette = gradient_palette(\@ROTOR_HUES);
+    my @pixels  = map { [ ($BLACK) x 140 ] } 1 .. 48;
+    for my $key (keys %$taken) {
+        my ($x, $y) = split /,/, $key;
+        my ($row, $col) = (23 - $y, 70 + 2 * $x);
+        next if $row < 0 || $row > 47;
+        @{ $pixels[$row] }[ $col, $col + 1 ] = (nearest_color_in(\@palette, gradient_rgb(\@ROTOR_HUES, $taken->{$key} / $count))) x 2;
+    }
+    my $canvas = pixels_to_canvas(\@pixels);
+    put_text($canvas, 0, 1, 'rotor-router',   97);
+    put_text($canvas, 1, 1, 'aggregation',    94);
+    return $canvas;
+}
+
+# The Gumowski-Mira map, from a study of particles in an accelerator:
+# x' = by + F(x), y' = -x + F(x'), with F(x) = ax + 2(1 - a)x^2 / (1 + x^2).
+sub mira_step {
+    my ($x, $y, $a, $b) = @_;
+    my $f = sub { $a * $_[0] + 2 * (1 - $a) * $_[0]**2 / (1 + $_[0]**2) };
+    my $next_x = $b * $y + $f->($x);
+    return ($next_x, -$x + $f->($next_x));
+}
+
+# $count points [x, y] of the orbit from (x, y), not counting the start.
+sub mira_points {
+    my ($count, $a, $b, $x, $y) = @_;
+    my @points;
+    for (1 .. $count) {
+        ($x, $y) = mira_step($x, $y, $a, $b);
+        push @points, [ $x, $y ];
+    }
+    return @points;
+}
+
+# With b = 1 the map never squeezes area, so each orbit keeps to its own
+# curve or band instead of falling onto one attractor. Twelve orbits at
+# a = 0.7, started further and further out along the x axis, each in its
+# own hue, make a flower.
+sub mira_canvas {
+    my $orbits = 12;
+    my @points = map { my $k = $_; map { [ @$_, $k / $orbits ] } mira_points(1500, 0.7, 1, 0.8 * $k, 0) } 1 .. $orbits;
+    my $pixel  = fit_to_frame(\@points);
+    my @rgb    = map { [ map { [ 0, 0, 0 ] } 1 .. 140 ] } 1 .. 48;
+    paint_points(\@rgb, [ $pixel->(@$_[ 0, 1 ]) ], [ gradient_rgb(\@ZETA_HUES, $_->[2]) ]) for @points;
+    my @palette = (gradient_palette(\@ZETA_HUES), $BLACK);
+    my $canvas  = pixels_to_canvas([ map { [ map { nearest_color_in(\@palette, @$_) } @$_ ] } @rgb ]);
+    put_text($canvas, 0, 1, 'the Gumowski-Mira map', 97);
+    put_text($canvas, 1, 1, 'a = 0.7, b = 1',        94);
+    return $canvas;
+}
+
+# The Pappus chain. An arbelos is the shape between three semicircles on a
+# line: one from A = (0, 0) to B = (1, 0), and two inside it from A to
+# C = (r, 0) and from C to B. Circle 0 is the one on CB, and each next
+# circle touches the one before, the big semicircle and the one on AC.
+# Returns circle n as [x, y, radius]. Pappus found that circle n's center
+# is always n diameters above the line.
+sub pappus_circle {
+    my ($n, $r) = @_;
+    my $spread = $n**2 * (1 - $r)**2 + $r;
+    return [ $r * (1 + $r) / (2 * $spread), $n * $r * (1 - $r) / $spread, $r * (1 - $r) / (2 * $spread) ];
+}
+
+# The arbelos filled in dark blue and the semicircle on AC in gray, with the
+# first fifteen circles of the chain filled in, each a step further along
+# the hues until the eighth, past which they're too small to tell apart.
+# AB is 136 pixels across and the line sits near the bottom,
+# leaving room above for the caption.
+sub pappus_canvas {
+    my $r       = 0.6;
+    my @circles = map { pappus_circle($_, $r) } 0 .. 15;
+    my @palette = gradient_palette(\@ZETA_HUES);
+    my @chain   = map { nearest_color_in(\@palette, gradient_rgb(\@ZETA_HUES, List::Util::min(1, ($_ + 1) / 9))) } 0 .. $#circles;
+    my ($arbelos, $inner) = (nearest_color(30, 30, 110), nearest_color(80, 80, 80));
+    my $inside  = sub { my ($x, $y, $circle) = @_; ($x - $circle->[0])**2 + ($y - $circle->[1])**2 < $circle->[2]**2 };
+    my @pixels  = map {
+        my $y = (44 - $_ - 0.5) / 68;
+        [ map {
+            my $x = ($_ - 2 + 0.5) / 136;
+            my $n = List::Util::first { $inside->($x, $y, $circles[$_]) } 0 .. $#circles;
+            $y < 0                                   ? $BLACK
+                : defined $n                         ? $chain[$n]
+                : $inside->($x, $y, [ $r / 2, 0, $r / 2 ]) ? $inner
+                : $inside->($x, $y, [ 0.5, 0, 0.5 ]) ? $arbelos
+                :                                      $BLACK;
+        } 0 .. 139 ];
+    } 0 .. 47;
+    my $canvas = pixels_to_canvas(\@pixels);
+    put_text($canvas, 0, 1, 'the Pappus chain:', 97);
+    put_text($canvas, 1, 1, 'circle n sits',     94);
+    put_text($canvas, 2, 1, 'n diameters up',    94);
+    return $canvas;
+}
+
 our %PIECES = (
     mandelbrot => { draw => \&mandelbrot_canvas, about => 'the whole Mandelbrot set, glowing toward its edge' },
     seahorse   => { draw => \&seahorse_canvas,   about => 'a seahorse tail in Seahorse Valley, 600 times closer' },
@@ -4786,6 +4989,10 @@ our %PIECES = (
     biomorph   => { draw => \&biomorph_canvas,   about => 'a biomorph: Pickover\'s creature, grown from z^3 + c and a lucky bug' },
     hofstadter => { draw => \&hofstadter_canvas, about => 'Hofstadter\'s butterfly: the energies of an electron in a magnetic field' },
     galaxy     => { draw => \&galaxy_canvas,     about => 'a spiral galaxy drawn with ellipses, each turned a little more than the last' },
+    aztec      => { draw => \&aztec_canvas,      about => 'the arctic circle: a random domino tiling, frozen at the corners and wild inside' },
+    rotor      => { draw => \&rotor_canvas,      about => 'rotor-router aggregation: particles steered by turning arrows, growing a perfect disk' },
+    mira       => { draw => \&mira_canvas,       about => 'the Gumowski-Mira map, from a study of particles in an accelerator' },
+    pappus     => { draw => \&pappus_canvas,     about => 'the Pappus chain: circles packed in an arbelos, each one diameter higher than the last' },
     hopf       => { draw => \&hopf_canvas,       about => 'the Hopf fibration: circles on a doughnut, every one linked through every other' },
     burningship => { draw => \&burningship_canvas, about => 'the Burning Ship fractal, z^2 + c with the orbit folded' },
     dragon     => { draw => \&dragon_canvas,     about => 'the Heighway dragon, a strip of paper folded in half eight times' },
